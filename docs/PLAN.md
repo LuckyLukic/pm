@@ -187,81 +187,81 @@ Success criteria
 
 Sign-off gate
 
-- [ ] User message: `Approved Part 7`
+- [x] User message: `Approved Part 7`
 
 ## Part 8: OpenAI Connectivity
 
 Checklist
 
-- [ ] Add backend OpenAI client integration using `OPENAI_API_KEY`.
-- [ ] Configure model to `gpt-5.4-mini`.
-- [ ] Add a minimal backend test endpoint or internal check for AI call health.
+- [x] Add backend OpenAI client integration using `OPENAI_API_KEY`.
+- [x] Configure model to `gpt-5.4-mini`.
+- [x] Add a minimal backend test endpoint or internal check for AI call health.
 
 Tests
 
-- [ ] Connectivity test prompt: `2+2`.
-- [ ] Verify response is returned through backend endpoint/service.
-- [ ] Verify behavior for missing/invalid API key.
+- [x] Connectivity test prompt: `2+2`.
+- [x] Verify response is returned through backend endpoint/service.
+- [x] Verify behavior for missing/invalid API key.
 
 Success criteria
 
-- [ ] Backend successfully reaches OpenAI with configured model.
-- [ ] Errors are surfaced clearly when key/model call fails.
-- [ ] Connectivity test is repeatable from local environment.
+- [x] Backend successfully reaches OpenAI with configured model.
+- [x] Errors are surfaced clearly when key/model call fails.
+- [x] Connectivity test is repeatable from local environment.
 
 Sign-off gate
 
-- [ ] User message: `Approved Part 8`
+- [x] User message: `Approved Part 8`
 
 ## Part 9: Structured AI Board Operations
 
 Checklist
 
-- [ ] Define structured output schema with an `assistant_response` field.
-- [ ] Add optional board update payload shape to the same schema.
-- [ ] Send current board JSON, user prompt, and chat history to model.
-- [ ] Apply validated board updates from AI output.
-- [ ] Add server-side validation and fallback on invalid outputs.
+- [x] Define structured output schema with an `assistant_response` field.
+- [x] Add optional board update payload shape to the same schema.
+- [x] Send current board JSON, user prompt, and chat history to model.
+- [x] Apply validated board updates from AI output.
+- [x] Add server-side validation and fallback on invalid outputs.
 
 Tests
 
-- [ ] Unit tests for structured output parser/validator.
-- [ ] Integration tests for AI responses with and without board updates.
-- [ ] Regression tests for invalid schema payload handling.
+- [x] Unit tests for structured output parser/validator.
+- [x] Integration tests for AI responses with and without board updates.
+- [x] Regression tests for invalid schema payload handling.
 
 Success criteria
 
-- [ ] AI responses are schema-conformant before use.
-- [ ] Optional board updates are applied safely and persist correctly.
-- [ ] Invalid AI outputs do not corrupt board data.
+- [x] AI responses are schema-conformant before use.
+- [x] Optional board updates are applied safely and persist correctly.
+- [x] Invalid AI outputs do not corrupt board data.
 
 Sign-off gate
 
-- [ ] User message: `Approved Part 9`
+- [x] User message: `Approved Part 9`
 
 ## Part 10: AI Sidebar in UI
 
 Checklist
 
-- [ ] Add sidebar chat UI to frontend.
-- [ ] Connect chat UI to backend AI endpoint.
-- [ ] Render conversation history.
-- [ ] Auto-refresh board state when AI returns board updates.
-- [ ] Keep visual style aligned with project color scheme.
+- [x] Add sidebar chat UI to frontend.
+- [x] Connect chat UI to backend AI endpoint.
+- [x] Render conversation history.
+- [x] Auto-refresh board state when AI returns board updates.
+- [x] Keep visual style aligned with project color scheme.
 
 Tests
 
-- [ ] Component tests for chat sidebar rendering and input behavior.
-- [ ] E2E: user sends message and receives assistant response.
-- [ ] E2E: AI-triggered board update appears in UI without manual refresh.
-- [ ] Full smoke test in Docker container.
+- [x] Component tests for chat sidebar rendering and input behavior.
+- [x] E2E: user sends message and receives assistant response.
+- [x] E2E: AI-triggered board update appears in UI without manual refresh.
+- [x] Full smoke test in Docker container.
 
 Success criteria
 
-- [ ] Chat works end-to-end from UI to OpenAI and back.
-- [ ] AI-initiated board updates appear correctly in Kanban.
-- [ ] Existing Kanban and auth flows remain stable.
+- [x] Chat works end-to-end from UI to OpenAI and back.
+- [x] AI-initiated board updates appear correctly in Kanban.
+- [x] Existing Kanban and auth flows remain stable.
 
 Sign-off gate
 
-- [ ] User message: `Approved Part 10`
+- [x] User message: `Approved Part 10`

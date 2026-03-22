@@ -39,3 +39,22 @@
 - All board edits persist through backend `PUT /api/board`.
 - API auth header for MVP is `X-User: user`.
 - Persistence e2e command: `cd frontend && npx playwright test tests/persistence.spec.ts --config=playwright.docker.config.ts`
+
+## Part 8 OpenAI Connectivity (MVP)
+
+- Backend connectivity endpoint: `POST /api/ai/health` with body `{"prompt":"2+2"}`.
+- Model default is `gpt-5.4-mini` (override with `OPENAI_MODEL`).
+- Missing/invalid API key is returned as a clear backend error message.
+
+## Part 9 Structured AI Board Operations (MVP)
+
+- Backend chat endpoint: `POST /api/ai/chat` (requires `X-User` header).
+- Request includes `prompt` and `chat_history`; backend also sends current board JSON to the model.
+- Model output must match schema: `assistant_response` plus optional `board` payload update.
+- Invalid schema output is safely rejected and board state remains unchanged.
+
+## Part 10 AI Sidebar (MVP)
+
+- Frontend includes an AI sidebar chat panel alongside the Kanban board.
+- Sidebar sends prompts to `POST /api/ai/chat` and renders conversation history.
+- If backend returns a `board` update, Kanban state refreshes immediately in UI.

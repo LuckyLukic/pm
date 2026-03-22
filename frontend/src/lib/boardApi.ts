@@ -4,6 +4,26 @@ type BoardEnvelope = {
   board: BoardData;
 };
 
+export type ChatRole = "user" | "assistant";
+
+export type ChatMessage = {
+  role: ChatRole;
+  content: string;
+};
+
+type AIChatRequest = {
+  prompt: string;
+  chat_history: ChatMessage[];
+};
+
+export type AIChatResponse = {
+  assistant_response: string;
+  board: BoardData;
+  board_updated: boolean;
+  used_fallback: boolean;
+  model: string;
+};
+
 const parseErrorMessage = async (response: Response) => {
   try {
     const payload = (await response.json()) as { detail?: string };
@@ -43,4 +63,24 @@ export const saveBoard = async (username: string, board: BoardData) => {
     },
     body: JSON.stringify({ board }),
   });
+};
+
+export const sendAiChat = async (
+  username: string,
+  payload: AIChatRequest
+) => {
+  const response = await fetch("/api/ai/chat", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-User": username,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+
+  return (await response.json()) as AIChatResponse;
 };

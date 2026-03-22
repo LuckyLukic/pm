@@ -61,3 +61,27 @@ def test_board_update_persists_for_authenticated_user(tmp_path: Path) -> None:
         get_response = client.get("/api/board", headers={"X-User": "user"})
         assert get_response.status_code == 200
         assert get_response.json()["board"] == updated_board
+
+
+def test_board_update_rejects_missing_card_reference(tmp_path: Path) -> None:
+    app = create_app(db_path=tmp_path / "invalid-board.db")
+    invalid_board = {
+        "columns": [
+            {
+                "id": "col-backlog",
+                "title": "Backlog",
+                "cardIds": ["card-missing"],
+            }
+        ],
+        "cards": {},
+    }
+
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/board",
+            headers={"X-User": "user"},
+            json={"board": invalid_board},
+        )
+
+    assert response.status_code == 422
+    assert "references missing card" in response.json()["detail"]

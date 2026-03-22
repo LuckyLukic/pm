@@ -1,8 +1,9 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { AIChatSidebar } from "@/components/AIChatSidebar";
 import { KanbanBoard } from "@/components/KanbanBoard";
-import { fetchBoard, saveBoard } from "@/lib/boardApi";
+import { type ChatMessage, fetchBoard, saveBoard, sendAiChat } from "@/lib/boardApi";
 import type { BoardData } from "@/lib/kanban";
 
 const AUTH_KEY = "pm.authenticated";
@@ -41,6 +42,11 @@ export default function Home() {
   const [loadError, setLoadError] = useState("");
   const [saveError, setSaveError] = useState("");
   const [boardReloadKey, setBoardReloadKey] = useState(0);
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const [chatPrompt, setChatPrompt] = useState("");
+  const [chatError, setChatError] = useState("");
+  const [isChatSending, setIsChatSending] = useState(false);
+  const [lastBoardUpdated, setLastBoardUpdated] = useState<boolean | null>(null);
   const latestSaveRequest = useRef(0);
 
   useEffect(() => {
@@ -105,6 +111,11 @@ export default function Home() {
     setLoadError("");
     setSaveError("");
     setIsBoardSaving(false);
+    setChatHistory([]);
+    setChatPrompt("");
+    setChatError("");
+    setIsChatSending(false);
+    setLastBoardUpdated(null);
   };
 
   const persistBoard = async (nextBoard: BoardData) => {
@@ -130,6 +141,45 @@ export default function Home() {
   const handleBoardChange = (nextBoard: BoardData) => {
     setBoard(nextBoard);
     void persistBoard(nextBoard);
+  };
+
+  const handleSendChat = async () => {
+    const prompt = chatPrompt.trim();
+    if (!prompt || !board || isChatSending) {
+      return;
+    }
+
+    const nextHistory: ChatMessage[] = [
+      ...chatHistory,
+      { role: "user", content: prompt },
+    ];
+    setChatHistory(nextHistory);
+    setChatPrompt("");
+    setChatError("");
+    setIsChatSending(true);
+    setLastBoardUpdated(null);
+
+    try {
+      const result = await sendAiChat(VALID_USERNAME, {
+        prompt,
+        chat_history: nextHistory,
+      });
+      const assistantMessage = result.assistant_response.trim() || "No response returned.";
+      setChatHistory([
+        ...nextHistory,
+        { role: "assistant", content: assistantMessage },
+      ]);
+      setBoard(result.board);
+      setLastBoardUpdated(result.board_updated);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Could not reach AI assistant. Try again.";
+      setChatError(message);
+    } finally {
+      setIsChatSending(false);
+    }
   };
 
   if (!isAuthReady) {
@@ -180,6 +230,19 @@ export default function Home() {
           saveState={saveError ? "error" : isBoardSaving ? "saving" : "idle"}
           saveErrorMessage={saveError || undefined}
           onLogout={handleLogout}
+          sidebar={
+            <AIChatSidebar
+              messages={chatHistory}
+              prompt={chatPrompt}
+              onPromptChange={setChatPrompt}
+              onSubmit={() => {
+                void handleSendChat();
+              }}
+              isSending={isChatSending}
+              error={chatError || undefined}
+              lastBoardUpdated={lastBoardUpdated}
+            />
+          }
         />
       );
     }

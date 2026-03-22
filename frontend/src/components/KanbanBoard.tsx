@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { ReactNode, useMemo, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -21,6 +21,7 @@ type KanbanBoardProps = {
   onBoardChange?: (board: BoardData) => void;
   saveState?: "idle" | "saving" | "error";
   saveErrorMessage?: string;
+  sidebar?: ReactNode;
 };
 
 export const KanbanBoard = ({
@@ -29,6 +30,7 @@ export const KanbanBoard = ({
   onBoardChange,
   saveState = "idle",
   saveErrorMessage,
+  sidebar,
 }: KanbanBoardProps) => {
   const [internalBoard, setInternalBoard] = useState<BoardData>(() => initialData);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
@@ -118,6 +120,20 @@ export const KanbanBoard = ({
     });
   };
 
+  const handleUpdateCard = (cardId: string, title: string, details: string) => {
+    setBoard((prev) => ({
+      ...prev,
+      cards: {
+        ...prev.cards,
+        [cardId]: {
+          ...prev.cards[cardId],
+          title,
+          details,
+        },
+      },
+    }));
+  };
+
   const activeCard = activeCardId ? cardsById[activeCardId] : null;
   const saveStatusText =
     saveState === "saving"
@@ -190,6 +206,12 @@ export const KanbanBoard = ({
           </div>
         </header>
 
+        {sidebar ? (
+          <section className="w-full">
+            <div className="mx-auto w-full max-w-[620px] xl:mx-0">{sidebar}</div>
+          </section>
+        ) : null}
+
         <DndContext
           sensors={sensors}
           collisionDetection={closestCorners}
@@ -205,6 +227,7 @@ export const KanbanBoard = ({
                 onRename={handleRenameColumn}
                 onAddCard={handleAddCard}
                 onDeleteCard={handleDeleteCard}
+                onUpdateCard={handleUpdateCard}
               />
             ))}
           </section>
