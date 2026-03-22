@@ -17,11 +17,22 @@ import { createId, initialData, moveCard, type BoardData } from "@/lib/kanban";
 
 type KanbanBoardProps = {
   onLogout?: () => void;
+  board?: BoardData;
+  onBoardChange?: (board: BoardData) => void;
+  saveState?: "idle" | "saving" | "error";
+  saveErrorMessage?: string;
 };
 
-export const KanbanBoard = ({ onLogout }: KanbanBoardProps) => {
-  const [board, setBoard] = useState<BoardData>(() => initialData);
+export const KanbanBoard = ({
+  onLogout,
+  board,
+  onBoardChange,
+  saveState = "idle",
+  saveErrorMessage,
+}: KanbanBoardProps) => {
+  const [internalBoard, setInternalBoard] = useState<BoardData>(() => initialData);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  const currentBoard = board ?? internalBoard;
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -29,7 +40,21 @@ export const KanbanBoard = ({ onLogout }: KanbanBoardProps) => {
     })
   );
 
-  const cardsById = useMemo(() => board.cards, [board.cards]);
+  const cardsById = useMemo(() => currentBoard.cards, [currentBoard.cards]);
+
+  const setBoard = (updater: (prev: BoardData) => BoardData) => {
+    if (board) {
+      const nextBoard = updater(board);
+      onBoardChange?.(nextBoard);
+      return;
+    }
+
+    setInternalBoard((prev) => {
+      const nextBoard = updater(prev);
+      onBoardChange?.(nextBoard);
+      return nextBoard;
+    });
+  };
 
   const handleDragStart = (event: DragStartEvent) => {
     setActiveCardId(event.active.id as string);
@@ -94,6 +119,12 @@ export const KanbanBoard = ({ onLogout }: KanbanBoardProps) => {
   };
 
   const activeCard = activeCardId ? cardsById[activeCardId] : null;
+  const saveStatusText =
+    saveState === "saving"
+      ? "Saving changes..."
+      : saveState === "error"
+        ? "Save failed"
+        : "All changes saved";
 
   return (
     <div className="relative overflow-hidden">
@@ -124,6 +155,17 @@ export const KanbanBoard = ({ onLogout }: KanbanBoardProps) => {
                   One board. Five columns. Zero clutter.
                 </p>
               </div>
+              <div className="rounded-2xl border border-[var(--stroke)] bg-white px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">
+                  Sync
+                </p>
+                <p className="mt-1 text-sm font-semibold text-[var(--navy-dark)]">
+                  {saveStatusText}
+                </p>
+                {saveErrorMessage ? (
+                  <p className="mt-1 text-xs text-red-700">{saveErrorMessage}</p>
+                ) : null}
+              </div>
               {onLogout ? (
                 <button
                   type="button"
@@ -136,7 +178,7 @@ export const KanbanBoard = ({ onLogout }: KanbanBoardProps) => {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-4">
-            {board.columns.map((column) => (
+            {currentBoard.columns.map((column) => (
               <div
                 key={column.id}
                 className="flex items-center gap-2 rounded-full border border-[var(--stroke)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--navy-dark)]"
@@ -155,11 +197,11 @@ export const KanbanBoard = ({ onLogout }: KanbanBoardProps) => {
           onDragEnd={handleDragEnd}
         >
           <section className="grid gap-6 lg:grid-cols-5">
-            {board.columns.map((column) => (
+            {currentBoard.columns.map((column) => (
               <KanbanColumn
                 key={column.id}
                 column={column}
-                cards={column.cardIds.map((cardId) => board.cards[cardId])}
+                cards={column.cardIds.map((cardId) => currentBoard.cards[cardId])}
                 onRename={handleRenameColumn}
                 onAddCard={handleAddCard}
                 onDeleteCard={handleDeleteCard}

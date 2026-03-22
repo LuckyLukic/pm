@@ -1,7 +1,9 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { KanbanBoard } from "@/components/KanbanBoard";
+import { fetchBoard, saveBoard } from "@/lib/boardApi";
+import type { BoardData } from "@/lib/kanban";
 
 const AUTH_KEY = "pm.authenticated";
 const VALID_USERNAME = "user";
@@ -33,12 +35,54 @@ export default function Home() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [board, setBoard] = useState<BoardData | null>(null);
+  const [isBoardLoading, setIsBoardLoading] = useState(false);
+  const [isBoardSaving, setIsBoardSaving] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [boardReloadKey, setBoardReloadKey] = useState(0);
+  const latestSaveRequest = useRef(0);
 
   useEffect(() => {
     const isLoggedIn = readAuthFlag();
     setIsAuthenticated(isLoggedIn);
     setIsAuthReady(true);
   }, []);
+
+  useEffect(() => {
+    if (!isAuthReady || !isAuthenticated) {
+      return;
+    }
+
+    let cancelled = false;
+    const loadBoard = async () => {
+      setIsBoardLoading(true);
+      setLoadError("");
+      try {
+        const loadedBoard = await fetchBoard(VALID_USERNAME);
+        if (cancelled) {
+          return;
+        }
+        setBoard(loadedBoard);
+      } catch {
+        if (cancelled) {
+          return;
+        }
+        setLoadError("Unable to load board. Check API and retry.");
+        setBoard(null);
+      } finally {
+        if (!cancelled) {
+          setIsBoardLoading(false);
+        }
+      }
+    };
+
+    void loadBoard();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthReady, isAuthenticated, boardReloadKey]);
 
   const handleLogin = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -57,6 +101,35 @@ export default function Home() {
     setUsername("");
     setPassword("");
     setError("");
+    setBoard(null);
+    setLoadError("");
+    setSaveError("");
+    setIsBoardSaving(false);
+  };
+
+  const persistBoard = async (nextBoard: BoardData) => {
+    const requestId = latestSaveRequest.current + 1;
+    latestSaveRequest.current = requestId;
+    setIsBoardSaving(true);
+    setSaveError("");
+
+    try {
+      await saveBoard(VALID_USERNAME, nextBoard);
+    } catch {
+      if (requestId !== latestSaveRequest.current) {
+        return;
+      }
+      setSaveError("Could not save board changes. Edit again to retry.");
+    } finally {
+      if (requestId === latestSaveRequest.current) {
+        setIsBoardSaving(false);
+      }
+    }
+  };
+
+  const handleBoardChange = (nextBoard: BoardData) => {
+    setBoard(nextBoard);
+    void persistBoard(nextBoard);
   };
 
   if (!isAuthReady) {
@@ -64,7 +137,62 @@ export default function Home() {
   }
 
   if (isAuthenticated) {
-    return <KanbanBoard onLogout={handleLogout} />;
+    if (isBoardLoading && !board) {
+      return (
+        <main className="relative mx-auto flex min-h-screen w-full max-w-[560px] flex-col justify-center px-6 py-12">
+          <section className="rounded-3xl border border-[var(--stroke)] bg-white p-8 shadow-[var(--shadow)]">
+            <h1 className="font-display text-3xl font-semibold text-[var(--navy-dark)]">
+              Loading board...
+            </h1>
+            <p className="mt-3 text-sm text-[var(--gray-text)]">
+              Fetching the latest board state from the backend API.
+            </p>
+          </section>
+        </main>
+      );
+    }
+
+    if (loadError && !board) {
+      return (
+        <main className="relative mx-auto flex min-h-screen w-full max-w-[560px] flex-col justify-center px-6 py-12">
+          <section className="rounded-3xl border border-[var(--stroke)] bg-white p-8 shadow-[var(--shadow)]">
+            <h1 className="font-display text-3xl font-semibold text-[var(--navy-dark)]">
+              Board unavailable
+            </h1>
+            <p className="mt-3 text-sm text-red-700">{loadError}</p>
+            <button
+              type="button"
+              onClick={() => setBoardReloadKey((prev) => prev + 1)}
+              className="mt-6 rounded-full bg-[var(--secondary-purple)] px-4 py-3 text-sm font-semibold uppercase tracking-[0.08em] text-white transition hover:brightness-110"
+            >
+              Retry
+            </button>
+          </section>
+        </main>
+      );
+    }
+
+    if (board) {
+      return (
+        <KanbanBoard
+          board={board}
+          onBoardChange={handleBoardChange}
+          saveState={saveError ? "error" : isBoardSaving ? "saving" : "idle"}
+          saveErrorMessage={saveError || undefined}
+          onLogout={handleLogout}
+        />
+      );
+    }
+
+    return (
+      <main className="relative mx-auto flex min-h-screen w-full max-w-[560px] flex-col justify-center px-6 py-12">
+        <section className="rounded-3xl border border-[var(--stroke)] bg-white p-8 shadow-[var(--shadow)]">
+          <h1 className="font-display text-3xl font-semibold text-[var(--navy-dark)]">
+            Preparing board...
+          </h1>
+        </section>
+      </main>
+    );
   }
 
   return (

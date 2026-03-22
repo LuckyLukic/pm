@@ -5,6 +5,8 @@ const login = async (page: Page) => {
   await page.getByLabel("Username").fill("user");
   await page.getByLabel("Password").fill("password");
   await page.getByRole("button", { name: /sign in/i }).click();
+  await expect(page.getByRole("heading", { name: "Kanban Studio" })).toBeVisible();
+  await expect(page.locator('[data-testid^="column-"]')).toHaveCount(5);
 };
 
 test("loads the kanban board", async ({ page }) => {

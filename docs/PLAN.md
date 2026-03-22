@@ -122,7 +122,7 @@ Checklist
 - [x] Propose SQLite schema for users and one-board-per-user storage.
 - [x] Store board state as JSON blob for MVP simplicity.
 - [x] Document schema, migration approach, and tradeoffs in `docs/`.
-- [ ] Obtain user schema sign-off before coding backend persistence.
+- [x] Obtain user schema sign-off before coding backend persistence.
 
 Tests
 
@@ -134,56 +134,56 @@ Success criteria
 
 - [x] Schema is documented and unambiguous.
 - [x] JSON board payload shape is explicitly defined.
-- [ ] User approves schema document before implementation.
+- [x] User approves schema document before implementation.
 
 Sign-off gate
 
-- [ ] User message: `Approved Part 5`
+- [x] User message: `Approved Part 5`
 
 ## Part 6: Backend Kanban API
 
 Checklist
 
-- [ ] Implement DB initialization on startup if DB file is missing.
-- [ ] Add API routes to fetch and update board by authenticated user.
-- [ ] Add API route tests for success and failure cases.
-- [ ] Keep endpoints minimal and aligned with frontend needs.
+- [x] Implement DB initialization on startup if DB file is missing.
+- [x] Add API routes to fetch and update board by authenticated user.
+- [x] Add API route tests for success and failure cases.
+- [x] Keep endpoints minimal and aligned with frontend needs.
 
 Tests
 
-- [ ] Backend tests: `cd backend && pytest`
-- [ ] API smoke tests via `curl` for read and update flows.
-- [ ] DB creation test from empty filesystem state.
+- [x] Backend tests: `docker compose run --rm app sh -lc "uv sync --dev && uv run pytest tests/test_board_api.py"`
+- [x] API smoke tests via `curl` for read and update flows.
+- [x] DB creation test from empty filesystem state.
 
 Success criteria
 
-- [ ] Backend can persist and return board state per user.
-- [ ] API tests pass and cover happy/error paths.
-- [ ] DB auto-creation works with no manual setup.
+- [x] Backend can persist and return board state per user.
+- [x] API tests pass and cover happy/error paths.
+- [x] DB auto-creation works with no manual setup.
 
 Sign-off gate
 
-- [ ] User message: `Approved Part 6`
+- [x] User message: `Approved Part 6`
 
 ## Part 7: Frontend + Backend Integration
 
 Checklist
 
-- [ ] Replace in-memory frontend board state with backend API calls.
-- [ ] Persist edits/moves/adds/deletes through backend.
-- [ ] Keep UX responsive with clear loading/error handling.
+- [x] Replace in-memory frontend board state with backend API calls.
+- [x] Persist edits/moves/adds/deletes through backend.
+- [x] Keep UX responsive with clear loading/error handling.
 
 Tests
 
-- [ ] Frontend unit tests for API client/state integration.
-- [ ] Backend tests remain green.
-- [ ] E2E persistence test: reload page and confirm board state remains.
+- [x] Frontend unit tests for API client/state integration: `cd frontend && npm run test:unit -- src/app/page.integration.test.tsx src/app/page.auth.test.tsx`
+- [x] Backend tests remain green: `docker compose run --rm app sh -lc "uv sync --dev && uv run pytest tests/test_board_api.py"`
+- [x] E2E persistence test: `cd frontend && npx playwright test tests/persistence.spec.ts --config=playwright.docker.config.ts`
 
 Success criteria
 
-- [ ] Board changes persist across refreshes.
-- [ ] Integration does not break login flow.
-- [ ] Unit + integration + e2e coverage passes for core board flows.
+- [x] Board changes persist across refreshes.
+- [x] Integration does not break login flow.
+- [x] Unit + integration + e2e coverage passes for core board flows.
 
 Sign-off gate
 

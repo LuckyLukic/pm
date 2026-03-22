@@ -1,10 +1,25 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Home from "@/app/page";
+import { initialData } from "@/lib/kanban";
 
 describe("Home auth flow", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        return new Response(JSON.stringify({ board: initialData }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      })
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("shows error for invalid credentials, signs in with valid credentials, and logs out", async () => {
