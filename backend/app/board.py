@@ -57,6 +57,13 @@ DEFAULT_BOARD: dict[str, Any] = {
 }
 
 
+def strip_tag_names(board: dict[str, Any]) -> dict[str, Any]:
+    """Remove tagNames from cards before persisting to DB."""
+    for card in board.get("cards", {}).values():
+        card.pop("tagNames", None)
+    return board
+
+
 def validate_board_integrity(board: dict[str, Any]) -> None:
     cards = board.get("cards", {})
     columns = board.get("columns", [])

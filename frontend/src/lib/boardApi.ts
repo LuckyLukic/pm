@@ -142,7 +142,7 @@ export const deleteTag = async (username: string, tagId: number): Promise<void> 
 export const sendAiPlan = async (
   username: string,
   projectId: number,
-  payload: { description: string; chat_history: ChatMessage[] },
+  payload: { description: string; chat_history: ChatMessage[]; dry_run?: boolean },
   signal?: AbortSignal
 ) => {
   const response = await fetch(`/api/projects/${projectId}/ai/plan`, {
@@ -160,6 +160,21 @@ export const sendAiPlan = async (
   }
 
   return (await response.json()) as AIChatResponse;
+};
+
+export const confirmAiPlan = async (
+  username: string,
+  projectId: number,
+  payload: { board: BoardData; tags: PendingTag[] },
+): Promise<BoardData> => {
+  return requestBoard(`/api/projects/${projectId}/ai/plan/confirm`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-User": username,
+    },
+    body: JSON.stringify(payload),
+  });
 };
 
 // ---------- Board (project-scoped) ----------
@@ -180,12 +195,18 @@ type AIChatRequest = {
   chat_history: ChatMessage[];
 };
 
+export type PendingTag = {
+  name: string;
+  color: string;
+};
+
 export type AIChatResponse = {
   assistant_response: string;
   board: BoardData;
   board_updated: boolean;
   used_fallback: boolean;
   model: string;
+  pending_tags?: PendingTag[] | null;
 };
 
 const parseErrorMessage = async (response: Response) => {

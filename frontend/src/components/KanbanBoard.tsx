@@ -16,7 +16,7 @@ import {
 } from "@dnd-kit/core";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
-import { createId, initialData, moveCard, type BoardData } from "@/lib/kanban";
+import { addColumn, createId, deleteColumn, initialData, moveCard, type BoardData } from "@/lib/kanban";
 import type { Tag } from "@/lib/boardApi";
 
 type KanbanBoardProps = {
@@ -28,6 +28,9 @@ type KanbanBoardProps = {
   sidebar?: ReactNode;
   projectControls?: ReactNode;
   tags?: Tag[];
+  onCreateTag?: (name: string, color: string) => Promise<Tag>;
+  onUpdateTag?: (tagId: number, data: { name?: string; color?: string }) => Promise<Tag>;
+  onDeleteTag?: (tagId: number) => Promise<void>;
 };
 
 export const KanbanBoard = ({
@@ -39,10 +42,15 @@ export const KanbanBoard = ({
   sidebar,
   projectControls,
   tags = [],
+  onCreateTag,
+  onUpdateTag,
+  onDeleteTag,
 }: KanbanBoardProps) => {
   const [internalBoard, setInternalBoard] = useState<BoardData>(() => initialData);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [desktopSidebarVisible, setDesktopSidebarVisible] = useState(true);
   const currentBoard = board ?? internalBoard;
 
   const sensors = useSensors(
@@ -137,6 +145,14 @@ export const KanbanBoard = ({
     }));
   };
 
+  const handleAddColumn = () => {
+    setBoard((prev) => addColumn(prev));
+  };
+
+  const handleDeleteColumn = (columnId: string) => {
+    setBoard((prev) => deleteColumn(prev, columnId));
+  };
+
   const activeCard = activeCardId ? cardsById[activeCardId] : null;
 
   const saveIndicator =
@@ -180,17 +196,56 @@ export const KanbanBoard = ({
         <div className="flex items-center gap-3">
           {saveIndicator}
 
+          {onCreateTag ? (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setTagManagerOpen(!tagManagerOpen)}
+                className="flex h-8 items-center gap-1.5 rounded-[var(--radius-sm)] border border-[var(--stroke)] px-2.5 text-[var(--gray-text)] transition hover:border-[var(--stroke-strong)] hover:text-[var(--navy-dark)]"
+                aria-label="Manage tags"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+                  <line x1="7" y1="7" x2="7.01" y2="7" />
+                </svg>
+                <span className="hidden text-xs font-medium sm:inline">Tags</span>
+              </button>
+              {tagManagerOpen ? (
+                <TagManager
+                  tags={tags}
+                  onCreateTag={onCreateTag}
+                  onUpdateTag={onUpdateTag}
+                  onDeleteTag={onDeleteTag}
+                  onClose={() => setTagManagerOpen(false)}
+                />
+              ) : null}
+            </div>
+          ) : null}
+
           {sidebar ? (
-            <button
-              type="button"
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--stroke)] text-[var(--gray-text)] transition hover:border-[var(--stroke-strong)] hover:text-[var(--navy-dark)] lg:hidden"
-              aria-label="Toggle AI chat"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-              </svg>
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--stroke)] text-[var(--gray-text)] transition hover:border-[var(--stroke-strong)] hover:text-[var(--navy-dark)] lg:hidden"
+                aria-label="Toggle AI chat"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => setDesktopSidebarVisible(!desktopSidebarVisible)}
+                className="hidden h-8 w-8 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--stroke)] text-[var(--gray-text)] transition hover:border-[var(--stroke-strong)] hover:text-[var(--navy-dark)] lg:flex"
+                aria-label={desktopSidebarVisible ? "Hide AI chat" : "Show AI chat"}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                  {!desktopSidebarVisible && <line x1="9" y1="9" x2="15" y2="15" />}
+                </svg>
+              </button>
+            </>
           ) : null}
 
           {onLogout ? (
@@ -221,19 +276,38 @@ export const KanbanBoard = ({
             onDragCancel={() => setActiveCardId(null)}
             onDragEnd={handleDragEnd}
           >
-            <div className="grid min-w-[900px] gap-4 lg:grid-cols-5">
+            <div
+              className="grid gap-4"
+              style={{
+                gridTemplateColumns: `repeat(${currentBoard.columns.length + 1}, minmax(250px, 1fr))`,
+              }}
+            >
               {currentBoard.columns.map((column) => (
                 <KanbanColumn
                   key={column.id}
                   column={column}
                   cards={column.cardIds.map((cardId) => currentBoard.cards[cardId])}
                   tags={tags}
+                  canDelete={currentBoard.columns.length > 1}
                   onRename={handleRenameColumn}
                   onAddCard={handleAddCard}
                   onDeleteCard={handleDeleteCard}
+                  onDeleteColumn={handleDeleteColumn}
                   onUpdateCard={handleUpdateCard}
                 />
               ))}
+              <button
+                type="button"
+                onClick={handleAddColumn}
+                className="flex min-h-[480px] flex-col items-center justify-center gap-2 rounded-[var(--radius-lg)] border-2 border-dashed border-[var(--stroke-strong)] bg-transparent p-3 text-[var(--gray-text)] transition hover:border-[var(--secondary-purple)] hover:text-[var(--secondary-purple)]"
+                data-testid="btn-add-col"
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                <span className="text-sm font-medium">Add Column</span>
+              </button>
             </div>
             <DragOverlay>
               {activeCard ? (
@@ -245,7 +319,7 @@ export const KanbanBoard = ({
           </DndContext>
         </div>
 
-        {sidebar ? (
+        {sidebar && desktopSidebarVisible ? (
           <aside className="hidden w-[360px] shrink-0 border-l border-[var(--stroke)] bg-white lg:block">
             <div className="h-full overflow-y-auto">{sidebar}</div>
           </aside>
@@ -280,3 +354,153 @@ export const KanbanBoard = ({
     </div>
   );
 };
+
+const TAG_COLORS = ["#753991", "#209dd7", "#ecad0a", "#e85d3a", "#2ecc71", "#e74c3c", "#3498db", "#9b59b6", "#1abc9c", "#f39c12"];
+
+function TagManager({
+  tags,
+  onCreateTag,
+  onUpdateTag,
+  onDeleteTag,
+  onClose,
+}: {
+  tags: Tag[];
+  onCreateTag: (name: string, color: string) => Promise<Tag>;
+  onUpdateTag?: (tagId: number, data: { name?: string; color?: string }) => Promise<Tag>;
+  onDeleteTag?: (tagId: number) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [newName, setNewName] = useState("");
+  const [newColor, setNewColor] = useState(TAG_COLORS[0]);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editColor, setEditColor] = useState("");
+
+  const handleCreate = async () => {
+    const name = newName.trim();
+    if (!name) return;
+    await onCreateTag(name, newColor);
+    setNewName("");
+    setNewColor(TAG_COLORS[Math.floor(Math.random() * TAG_COLORS.length)]);
+  };
+
+  const handleUpdate = async (tagId: number) => {
+    const name = editName.trim();
+    if (!name || !onUpdateTag) return;
+    await onUpdateTag(tagId, { name, color: editColor });
+    setEditingId(null);
+  };
+
+  const handleDelete = async (tagId: number) => {
+    if (!onDeleteTag) return;
+    await onDeleteTag(tagId);
+  };
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} />
+      <div className="absolute right-0 top-full z-50 mt-2 w-72 rounded-[var(--radius-lg)] border border-[var(--stroke)] bg-white p-4 shadow-[var(--shadow-xl)]">
+        <h3 className="mb-3 text-sm font-semibold text-[var(--navy-dark)]">Manage Tags</h3>
+
+        {/* Existing tags */}
+        <div className="mb-3 max-h-48 space-y-1.5 overflow-y-auto">
+          {tags.length === 0 ? (
+            <p className="text-xs text-[var(--gray-text)]">No tags yet. Create one below.</p>
+          ) : (
+            tags.map((tag) =>
+              editingId === tag.id ? (
+                <div key={tag.id} className="flex items-center gap-1.5">
+                  <input
+                    type="color"
+                    value={editColor}
+                    onChange={(e) => setEditColor(e.target.value)}
+                    className="h-6 w-6 shrink-0 cursor-pointer rounded border-0 bg-transparent p-0"
+                  />
+                  <input
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") void handleUpdate(tag.id); }}
+                    className="min-w-0 flex-1 rounded-[var(--radius-sm)] border border-[var(--stroke-strong)] px-2 py-1 text-xs outline-none focus:border-[var(--secondary-purple)]"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handleUpdate(tag.id)}
+                    className="shrink-0 text-xs font-medium text-emerald-600 hover:underline"
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingId(null)}
+                    className="shrink-0 text-xs text-[var(--gray-text)] hover:underline"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div key={tag.id} className="flex items-center gap-1.5">
+                  <span
+                    className="h-3 w-3 shrink-0 rounded-full"
+                    style={{ backgroundColor: tag.color }}
+                  />
+                  <span className="min-w-0 flex-1 truncate text-xs text-[var(--navy-dark)]">{tag.name}</span>
+                  {onUpdateTag ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingId(tag.id);
+                        setEditName(tag.name);
+                        setEditColor(tag.color);
+                      }}
+                      className="shrink-0 text-[10px] text-[var(--gray-text)] hover:text-[var(--navy-dark)]"
+                    >
+                      Edit
+                    </button>
+                  ) : null}
+                  {onDeleteTag ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleDelete(tag.id)}
+                      className="shrink-0 text-[10px] text-[var(--gray-text)] hover:text-red-500"
+                    >
+                      Delete
+                    </button>
+                  ) : null}
+                </div>
+              )
+            )
+          )}
+        </div>
+
+        {/* Create new tag */}
+        <div className="border-t border-[var(--stroke)] pt-3">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--gray-light)]">New tag</p>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="color"
+              value={newColor}
+              onChange={(e) => setNewColor(e.target.value)}
+              className="h-6 w-6 shrink-0 cursor-pointer rounded border-0 bg-transparent p-0"
+            />
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") void handleCreate(); }}
+              placeholder="Tag name"
+              className="min-w-0 flex-1 rounded-[var(--radius-sm)] border border-[var(--stroke-strong)] px-2 py-1 text-xs outline-none focus:border-[var(--secondary-purple)]"
+            />
+            <button
+              type="button"
+              onClick={() => void handleCreate()}
+              disabled={!newName.trim()}
+              className="shrink-0 rounded-[var(--radius-sm)] bg-[var(--secondary-purple)] px-2.5 py-1 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-50"
+            >
+              Add
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}

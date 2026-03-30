@@ -183,11 +183,39 @@ def run_openai_plan_operation(
     return response_text
 
 
-def parse_structured_plan_output(raw_output: str) -> dict[str, Any]:
+def _extract_json(raw: str) -> Any:
+    """Extract JSON from raw AI output, stripping markdown fences and surrounding text."""
+    text = raw.strip()
+    # Strip markdown code fences
+    if "```" in text:
+        import re
+        match = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
+        if match:
+            text = match.group(1).strip()
+    # Try parsing directly
     try:
-        payload = json.loads(raw_output)
-    except json.JSONDecodeError as error:
-        raise AIResponseValidationError(f"AI plan response is not valid JSON: {error.msg}") from error
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    # Try to find a JSON object in the text
+    start = text.find("{")
+    if start != -1:
+        depth = 0
+        for i in range(start, len(text)):
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(text[start : i + 1])
+                    except json.JSONDecodeError:
+                        break
+    raise AIResponseValidationError("AI response does not contain valid JSON.")
+
+
+def parse_structured_plan_output(raw_output: str) -> dict[str, Any]:
+    payload = _extract_json(raw_output)
 
     if not isinstance(payload, dict):
         raise AIResponseValidationError("AI plan response is not a JSON object.")
@@ -199,10 +227,7 @@ def parse_structured_plan_output(raw_output: str) -> dict[str, Any]:
 
 
 def parse_structured_board_output(raw_output: str) -> AIStructuredBoardOutput:
-    try:
-        payload = json.loads(raw_output)
-    except json.JSONDecodeError as error:
-        raise AIResponseValidationError(f"AI response is not valid JSON: {error.msg}") from error
+    payload = _extract_json(raw_output)
 
     try:
         structured = AIStructuredBoardOutput.model_validate(payload)

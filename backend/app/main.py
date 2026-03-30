@@ -14,11 +14,12 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 
 from app import ai, db
-from app.board import DEFAULT_BOARD, validate_board_integrity
+from app.board import DEFAULT_BOARD, strip_tag_names, validate_board_integrity
 from app.models import (
     AIChatResponse,
     AIHealthRequest,
     AIHealthResponse,
+    AIPlanConfirmRequest,
     AIPlanRequest,
     AuthRequest,
     AuthResponse,
@@ -404,38 +405,53 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         response_text = ai.AI_OUTPUT_FALLBACK_MESSAGE
         final_board = current_board
 
+        pending_tags: list[dict[str, str]] | None = None
+
         try:
             structured = ai.parse_structured_plan_output(raw_output)
             response_text = structured["assistant_response"]
 
             if structured.get("tags") and structured.get("board"):
-                with db.get_connection(request.app.state.db_path) as connection:
-                    user_id = db.ensure_user(connection, username)
-                    tag_id_map: dict[str, int] = {}
-                    for tag_info in structured["tags"]:
-                        tag = db.get_or_create_tag(connection, user_id, tag_info["name"], tag_info["color"])
-                        tag_id_map[tag_info["name"]] = tag["id"]
-
+                if payload.dry_run:
+                    pending_tags = structured["tags"]
                     plan_board = structured["board"]
                     for card in plan_board.get("cards", {}).values():
-                        tag_names = card.get("tagNames", [])
-                        card["tagIds"] = [tag_id_map[n] for n in tag_names if n in tag_id_map]
-                        card.pop("tagNames", None)
-
+                        card.setdefault("tagNames", [])
+                        card.setdefault("tagIds", [])
                     validated = BoardPayload.model_validate(plan_board)
                     final_board = validated.model_dump()
                     validate_board_integrity(final_board)
-                    db.save_board_for_project(connection, user_id, project_id, final_board)
-                    connection.commit()
+                else:
+                    with db.get_connection(request.app.state.db_path) as connection:
+                        user_id = db.ensure_user(connection, username)
+                        tag_id_map: dict[str, int] = {}
+                        for tag_info in structured["tags"]:
+                            tag = db.get_or_create_tag(connection, user_id, tag_info["name"], tag_info["color"])
+                            tag_id_map[tag_info["name"]] = tag["id"]
+
+                        plan_board = structured["board"]
+                        for card in plan_board.get("cards", {}).values():
+                            tag_names = card.get("tagNames", [])
+                            card["tagIds"] = [tag_id_map[n] for n in tag_names if n in tag_id_map]
+                            card.pop("tagNames", None)
+
+                        validated = BoardPayload.model_validate(plan_board)
+                        final_board = validated.model_dump()
+                        validate_board_integrity(final_board)
+                        strip_tag_names(final_board)
+                        db.save_board_for_project(connection, user_id, project_id, final_board)
+                        connection.commit()
                     board_updated = True
             elif structured.get("board"):
                 validated = BoardPayload.model_validate(structured["board"])
                 final_board = validated.model_dump()
                 validate_board_integrity(final_board)
-                with db.get_connection(request.app.state.db_path) as connection:
-                    db.save_board_for_project(connection, user_id, project_id, final_board)
-                    connection.commit()
-                board_updated = True
+                if not payload.dry_run:
+                    with db.get_connection(request.app.state.db_path) as connection:
+                        strip_tag_names(final_board)
+                        db.save_board_for_project(connection, user_id, project_id, final_board)
+                        connection.commit()
+                    board_updated = True
         except (AIResponseValidationError, BoardValidationError, Exception) as exc:
             logger.warning("AI plan processing failed: %s", exc)
             used_fallback = True
@@ -448,7 +464,41 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             board_updated=board_updated,
             used_fallback=used_fallback,
             model=model,
+            pending_tags=[{"name": t["name"], "color": t["color"]} for t in pending_tags] if pending_tags else None,
         )
+
+    @app.post("/api/projects/{project_id}/ai/plan/confirm", response_model=BoardEnvelope)
+    def ai_plan_confirm(
+        project_id: int,
+        payload: AIPlanConfirmRequest,
+        request: Request,
+        username: str = Depends(get_authenticated_user),
+    ) -> BoardEnvelope:
+        with db.get_connection(request.app.state.db_path) as connection:
+            user_id = db.ensure_user(connection, username)
+            project = db.get_project(connection, user_id, project_id)
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found.")
+
+            tag_id_map: dict[str, int] = {}
+            for tag_info in payload.tags:
+                tag = db.get_or_create_tag(connection, user_id, tag_info.name, tag_info.color)
+                tag_id_map[tag_info.name] = tag["id"]
+
+            board_dict = payload.board.model_dump()
+            for card in board_dict.get("cards", {}).values():
+                tag_names = card.get("tagNames", [])
+                if tag_names:
+                    card["tagIds"] = [tag_id_map[n] for n in tag_names if n in tag_id_map]
+
+            validated = BoardPayload.model_validate(board_dict)
+            final_board = validated.model_dump()
+            validate_board_integrity(final_board)
+            strip_tag_names(final_board)
+            db.save_board_for_project(connection, user_id, project_id, final_board)
+            connection.commit()
+
+        return BoardEnvelope(board=BoardPayload.model_validate(final_board))
 
     # ---------- Legacy board routes (backward compat for old tests) ----------
 

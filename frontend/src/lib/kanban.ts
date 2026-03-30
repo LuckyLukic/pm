@@ -3,6 +3,7 @@ export type Card = {
   title: string;
   details: string;
   tagIds: number[];
+  tagNames?: string[];
 };
 
 export type Column = {
@@ -172,4 +173,29 @@ export const moveCard = (
 
 export const createId = (prefix: string) => {
   return `${prefix}-${crypto.randomUUID()}`;
+};
+
+export const addColumn = (board: BoardData): BoardData => ({
+  ...board,
+  columns: [
+    ...board.columns,
+    { id: createId("col"), title: "New Column", cardIds: [] },
+  ],
+});
+
+export const deleteColumn = (board: BoardData, columnId: string): BoardData => {
+  if (board.columns.length <= 1) return board;
+
+  const column = board.columns.find((c) => c.id === columnId);
+  if (!column) return board;
+
+  const remaining = board.columns.filter((c) => c.id !== columnId);
+  if (column.cardIds.length > 0) {
+    remaining[0] = {
+      ...remaining[0],
+      cardIds: [...remaining[0].cardIds, ...column.cardIds],
+    };
+  }
+
+  return { ...board, columns: remaining };
 };

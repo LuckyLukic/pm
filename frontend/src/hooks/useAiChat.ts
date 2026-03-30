@@ -1,7 +1,13 @@
 import { useRef, useState } from "react";
-import { type ChatMessage, sendAiChat, sendAiPlan } from "@/lib/boardApi";
+import { type ChatMessage, type PendingTag, sendAiChat, sendAiPlan, confirmAiPlan } from "@/lib/boardApi";
 import type { BoardData } from "@/lib/kanban";
 import type { AiMode } from "@/components/AIChatSidebar";
+
+export type PendingPlan = {
+  board: BoardData;
+  response: string;
+  tags: PendingTag[];
+};
 
 export const useAiChat = (
   username: string,
@@ -16,6 +22,8 @@ export const useAiChat = (
   const [isSending, setIsSending] = useState(false);
   const [lastBoardUpdated, setLastBoardUpdated] = useState<boolean | null>(null);
   const [mode, setMode] = useState<AiMode>("chat");
+  const [pendingPlan, setPendingPlan] = useState<PendingPlan | null>(null);
+  const [isConfirming, setIsConfirming] = useState(false);
   const abortController = useRef<AbortController | null>(null);
 
   const handleSend = async () => {
@@ -42,6 +50,7 @@ export const useAiChat = (
         result = await sendAiPlan(username, projectId, {
           description: prompt,
           chat_history: nextHistory,
+          dry_run: true,
         }, controller.signal);
       } else {
         result = await sendAiChat(username, projectId, {
@@ -54,10 +63,20 @@ export const useAiChat = (
         ...nextHistory,
         { role: "assistant", content: assistantMessage },
       ]);
-      onBoardUpdate(result.board);
-      setLastBoardUpdated(result.board_updated);
-      if (result.board_updated && onTagsReload) {
-        onTagsReload();
+
+      if (mode === "plan" && !result.used_fallback) {
+        setPendingPlan({
+          board: result.board,
+          response: assistantMessage,
+          tags: result.pending_tags ?? [],
+        });
+        setLastBoardUpdated(null);
+      } else {
+        onBoardUpdate(result.board);
+        setLastBoardUpdated(result.board_updated);
+        if (result.board_updated && onTagsReload) {
+          onTagsReload();
+        }
       }
     } catch (error) {
       if (controller.signal.aborted) {
@@ -76,6 +95,37 @@ export const useAiChat = (
     }
   };
 
+  const handleConfirmPlan = async () => {
+    if (!pendingPlan || projectId === null || isConfirming) return;
+    setIsConfirming(true);
+    try {
+      const confirmedBoard = await confirmAiPlan(username, projectId, {
+        board: pendingPlan.board,
+        tags: pendingPlan.tags,
+      });
+      onBoardUpdate(confirmedBoard);
+      setPendingPlan(null);
+      setLastBoardUpdated(true);
+      if (onTagsReload) onTagsReload();
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to confirm plan. Try again.";
+      setChatError(message);
+    } finally {
+      setIsConfirming(false);
+    }
+  };
+
+  const handleDiscardPlan = () => {
+    setPendingPlan(null);
+    setChatHistory((prev) => [
+      ...prev,
+      { role: "assistant", content: "Plan discarded." },
+    ]);
+  };
+
   const handleCancel = () => {
     abortController.current?.abort();
   };
@@ -86,6 +136,8 @@ export const useAiChat = (
     setChatError("");
     setIsSending(false);
     setLastBoardUpdated(null);
+    setPendingPlan(null);
+    setIsConfirming(false);
   };
 
   return {
@@ -100,5 +152,9 @@ export const useAiChat = (
     reset,
     mode,
     setMode,
+    pendingPlan,
+    isConfirming,
+    handleConfirmPlan,
+    handleDiscardPlan,
   };
 };

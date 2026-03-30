@@ -94,6 +94,9 @@ export default function Home() {
             saveErrorMessage={boardState.saveError || undefined}
             onLogout={handleLogout}
             tags={tagsState.tags}
+            onCreateTag={tagsState.createTag}
+            onUpdateTag={tagsState.updateTag}
+            onDeleteTag={tagsState.deleteTag}
             projectControls={
               <ProjectDropdown
                 projects={proj.projects}
@@ -116,6 +119,10 @@ export default function Home() {
                 lastBoardUpdated={chat.lastBoardUpdated}
                 mode={chat.mode}
                 onModeChange={chat.setMode}
+                pendingPlan={chat.pendingPlan}
+                isConfirming={chat.isConfirming}
+                onConfirmPlan={() => { void chat.handleConfirmPlan(); }}
+                onDiscardPlan={chat.handleDiscardPlan}
               />
             }
           />

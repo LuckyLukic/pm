@@ -10,6 +10,7 @@ class CardPayload(BaseModel):
     title: str
     details: str
     tagIds: list[int] = Field(default_factory=list)
+    tagNames: list[str] = Field(default_factory=list)
 
 
 class ColumnPayload(BaseModel):
@@ -53,12 +54,18 @@ class AIStructuredBoardOutput(BaseModel):
     board: BoardPayload | None = None
 
 
+class PendingTagPayload(BaseModel):
+    name: str
+    color: str
+
+
 class AIChatResponse(BaseModel):
     assistant_response: str
     board: BoardPayload
     board_updated: bool
     used_fallback: bool
     model: str
+    pending_tags: list[PendingTagPayload] | None = None
 
 
 class AIConnectivityError(Exception):
@@ -122,3 +129,9 @@ class TagUpdateRequest(BaseModel):
 class AIPlanRequest(BaseModel):
     description: str = Field(min_length=1, max_length=10000)
     chat_history: list[ChatMessagePayload] = Field(default_factory=list, max_length=50)
+    dry_run: bool = False
+
+
+class AIPlanConfirmRequest(BaseModel):
+    board: BoardPayload
+    tags: list[PendingTagPayload] = Field(default_factory=list)
