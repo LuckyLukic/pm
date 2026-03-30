@@ -29,15 +29,36 @@ describe("Home AI sidebar flow", () => {
         const path = toPath(input);
         const method = init?.method ?? "GET";
 
-        if (path === "/api/board" && method === "GET") {
+        if (path === "/api/auth/login" && method === "POST") {
+          return new Response(
+            JSON.stringify({ username: "user", message: "Login successful." }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+
+        if (path === "/api/projects" && method === "GET") {
+          return new Response(
+            JSON.stringify([{ id: 1, name: "My Project" }]),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+
+        if (path === "/api/tags" && method === "GET") {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (path === "/api/projects/1/board" && method === "GET") {
           return new Response(JSON.stringify({ board: persistedBoard }), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           });
         }
 
-        if (path === "/api/board" && method === "PUT") {
-          const payload = JSON.parse(String(init.body)) as { board: BoardData };
+        if (path === "/api/projects/1/board" && method === "PUT") {
+          const payload = JSON.parse(String(init!.body)) as { board: BoardData };
           persistedBoard = payload.board;
           return new Response(JSON.stringify({ board: persistedBoard }), {
             status: 200,
@@ -45,8 +66,8 @@ describe("Home AI sidebar flow", () => {
           });
         }
 
-        if (path === "/api/ai/chat" && method === "POST") {
-          const payload = JSON.parse(String(init.body)) as {
+        if (path === "/api/projects/1/ai/chat" && method === "POST") {
+          const payload = JSON.parse(String(init!.body)) as {
             prompt: string;
             chat_history: Array<{ role: string; content: string }>;
           };
@@ -90,7 +111,7 @@ describe("Home AI sidebar flow", () => {
     await userEvent.type(screen.getByLabelText(/password/i), "password");
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
 
-    await screen.findByRole("heading", { name: /kanban studio/i });
+    await screen.findByRole("heading", { name: /replay studio/i });
 
     await userEvent.type(
       screen.getByLabelText(/ask ai/i),
@@ -110,7 +131,7 @@ describe("Home AI sidebar flow", () => {
     expect(
       fetchMock.mock.calls.some(
         ([path, options]) =>
-          toPath(path as RequestInfo | URL) === "/api/ai/chat" &&
+          toPath(path as RequestInfo | URL) === "/api/projects/1/ai/chat" &&
           options?.method === "POST" &&
           (options.headers as Record<string, string>)?.["X-User"] === "user"
       )

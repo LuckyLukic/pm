@@ -1,246 +1,75 @@
 from __future__ import annotations
 
+import collections
 import copy
-import json
+import logging
 import os
-import sqlite3
+import re
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from openai import AuthenticationError, OpenAI
-from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, ValidationError
+
+from app import ai, db
+from app.board import DEFAULT_BOARD, validate_board_integrity
+from app.models import (
+    AIChatResponse,
+    AIHealthRequest,
+    AIHealthResponse,
+    AIPlanRequest,
+    AuthRequest,
+    AuthResponse,
+    BoardEnvelope,
+    BoardPayload,
+    BoardValidationError,
+    AIConnectivityError,
+    AIResponseValidationError,
+    AIChatRequest,
+    ProjectPayload,
+    ProjectCreateRequest,
+    ProjectRenameRequest,
+    TagPayload,
+    TagCreateRequest,
+    TagUpdateRequest,
+)
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BASE_DIR / "frontend"
-FALLBACK_INDEX_PATH = BASE_DIR / "static" / "index.html"
 DEFAULT_DB_PATH = BASE_DIR / "data" / "pm.db"
-DEFAULT_OPENAI_MODEL = "gpt-5.4-mini"
-AI_OUTPUT_FALLBACK_MESSAGE = (
-    "I could not apply this AI update safely, so the board was left unchanged."
-)
-
-DEFAULT_BOARD: dict[str, Any] = {
-    "columns": [
-        {"id": "col-backlog", "title": "Backlog", "cardIds": ["card-1", "card-2"]},
-        {"id": "col-discovery", "title": "Discovery", "cardIds": ["card-3"]},
-        {"id": "col-progress", "title": "In Progress", "cardIds": ["card-4", "card-5"]},
-        {"id": "col-review", "title": "Review", "cardIds": ["card-6"]},
-        {"id": "col-done", "title": "Done", "cardIds": ["card-7", "card-8"]},
-    ],
-    "cards": {
-        "card-1": {
-            "id": "card-1",
-            "title": "Align roadmap themes",
-            "details": "Draft quarterly themes with impact statements and metrics.",
-        },
-        "card-2": {
-            "id": "card-2",
-            "title": "Gather customer signals",
-            "details": "Review support tags, sales notes, and churn feedback.",
-        },
-        "card-3": {
-            "id": "card-3",
-            "title": "Prototype analytics view",
-            "details": "Sketch initial dashboard layout and key drill-downs.",
-        },
-        "card-4": {
-            "id": "card-4",
-            "title": "Refine status language",
-            "details": "Standardize column labels and tone across the board.",
-        },
-        "card-5": {
-            "id": "card-5",
-            "title": "Design card layout",
-            "details": "Add hierarchy and spacing for scanning dense lists.",
-        },
-        "card-6": {
-            "id": "card-6",
-            "title": "QA micro-interactions",
-            "details": "Verify hover, focus, and loading states.",
-        },
-        "card-7": {
-            "id": "card-7",
-            "title": "Ship marketing page",
-            "details": "Final copy approved and asset pack delivered.",
-        },
-        "card-8": {
-            "id": "card-8",
-            "title": "Close onboarding sprint",
-            "details": "Document release notes and share internally.",
-        },
-    },
-}
 
 
-class CardPayload(BaseModel):
-    id: str
-    title: str
-    details: str
+class RateLimiter:
+    def __init__(self, max_requests: int = 10, window_seconds: int = 60):
+        self._max_requests = max_requests
+        self._window_seconds = window_seconds
+        self._requests: dict[str, collections.deque[float]] = {}
+
+    def check(self, key: str) -> bool:
+        now = time.monotonic()
+        if key not in self._requests:
+            self._requests[key] = collections.deque()
+        timestamps = self._requests[key]
+        while timestamps and now - timestamps[0] > self._window_seconds:
+            timestamps.popleft()
+        if len(timestamps) >= self._max_requests:
+            return False
+        timestamps.append(now)
+        return True
 
 
-class ColumnPayload(BaseModel):
-    id: str
-    title: str
-    cardIds: list[str]
-
-
-class BoardPayload(BaseModel):
-    columns: list[ColumnPayload]
-    cards: dict[str, CardPayload]
-
-
-class BoardEnvelope(BaseModel):
-    board: BoardPayload
-
-
-class AIHealthRequest(BaseModel):
-    prompt: str = "2+2"
-
-
-class AIHealthResponse(BaseModel):
-    status: str
-    model: str
-    prompt: str
-    response: str
-
-
-class ChatMessagePayload(BaseModel):
-    role: Literal["user", "assistant"]
-    content: str
-
-
-class AIChatRequest(BaseModel):
-    prompt: str
-    chat_history: list[ChatMessagePayload] = Field(default_factory=list)
-
-
-class AIStructuredBoardOutput(BaseModel):
-    assistant_response: str
-    board: BoardPayload | None = None
-
-
-class AIChatResponse(BaseModel):
-    assistant_response: str
-    board: BoardPayload
-    board_updated: bool
-    used_fallback: bool
-    model: str
-
-
-class AIConnectivityError(Exception):
-    def __init__(self, message: str, status_code: int = 502):
-        super().__init__(message)
-        self.message = message
-        self.status_code = status_code
-
-
-class AIResponseValidationError(Exception):
-    def __init__(self, message: str):
-        super().__init__(message)
-        self.message = message
-
-
-class BoardValidationError(Exception):
-    def __init__(self, message: str):
-        super().__init__(message)
-        self.message = message
+ai_rate_limiter = RateLimiter(max_requests=10, window_seconds=60)
 
 
 def get_db_path() -> Path:
-    db_path = os.getenv("PM_DB_PATH")
-    if db_path:
-        return Path(db_path)
+    db_path_env = os.getenv("PM_DB_PATH")
+    if db_path_env:
+        return Path(db_path_env)
     return DEFAULT_DB_PATH
-
-
-def get_connection(db_path: Path) -> sqlite3.Connection:
-    connection = sqlite3.connect(db_path)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON")
-    return connection
-
-
-def initialize_database(db_path: Path) -> None:
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    with get_connection(db_path) as connection:
-        connection.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              username TEXT NOT NULL UNIQUE,
-              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS boards (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              user_id INTEGER NOT NULL UNIQUE,
-              board_json TEXT NOT NULL CHECK (json_valid(board_json)),
-              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-            );
-            """
-        )
-        connection.commit()
-
-
-def ensure_user(connection: sqlite3.Connection, username: str) -> int:
-    row = connection.execute(
-        "SELECT id FROM users WHERE username = ?",
-        (username,),
-    ).fetchone()
-    if row:
-        return int(row["id"])
-
-    cursor = connection.execute(
-        "INSERT INTO users (username) VALUES (?)",
-        (username,),
-    )
-    return int(cursor.lastrowid)
-
-
-def load_or_create_board(connection: sqlite3.Connection, user_id: int) -> dict[str, Any]:
-    row = connection.execute(
-        "SELECT board_json FROM boards WHERE user_id = ?",
-        (user_id,),
-    ).fetchone()
-    if row:
-        return json.loads(str(row["board_json"]))
-
-    board_data = copy.deepcopy(DEFAULT_BOARD)
-    connection.execute(
-        "INSERT INTO boards (user_id, board_json) VALUES (?, ?)",
-        (user_id, json.dumps(board_data)),
-    )
-    return board_data
-
-
-def save_board(connection: sqlite3.Connection, user_id: int, board: dict[str, Any]) -> None:
-    serialized_board = json.dumps(board)
-    row = connection.execute(
-        "SELECT id FROM boards WHERE user_id = ?",
-        (user_id,),
-    ).fetchone()
-
-    if row:
-        connection.execute(
-            """
-            UPDATE boards
-            SET board_json = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE user_id = ?
-            """,
-            (serialized_board, user_id),
-        )
-        return
-
-    connection.execute(
-        "INSERT INTO boards (user_id, board_json) VALUES (?, ?)",
-        (user_id, serialized_board),
-    )
 
 
 def get_authenticated_user(
@@ -248,138 +77,10 @@ def get_authenticated_user(
 ) -> str:
     if not x_user or not x_user.strip():
         raise HTTPException(status_code=401, detail="Missing authenticated user header.")
-    return x_user.strip()
-
-
-def get_openai_model() -> str:
-    return os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL)
-
-
-def run_openai_connectivity_check(api_key: str, model: str, prompt: str) -> str:
-    try:
-        client = OpenAI(api_key=api_key)
-        response = client.responses.create(model=model, input=prompt)
-    except AuthenticationError as error:
-        raise AIConnectivityError(
-            "OpenAI authentication failed. Check OPENAI_API_KEY.",
-            status_code=502,
-        ) from error
-    except Exception as error:
-        raise AIConnectivityError(f"OpenAI request failed: {error}") from error
-
-    response_text = (response.output_text or "").strip()
-    if not response_text:
-        raise AIConnectivityError("OpenAI returned an empty response.")
-    return response_text
-
-
-def build_ai_board_operation_input(
-    prompt: str,
-    chat_history: list[ChatMessagePayload],
-    board: dict[str, Any],
-) -> str:
-    if chat_history:
-        history_text = "\n".join(
-            f"{item.role}: {item.content.strip()}" for item in chat_history if item.content.strip()
-        )
-    else:
-        history_text = "(none)"
-
-    return (
-        "You are an assistant for a project management board.\n"
-        "Return only valid JSON with this shape:\n"
-        '{"assistant_response":"string","board":{...optional board payload...}}\n'
-        "Use the board field only if updates are needed. If no updates are needed, omit board.\n"
-        f"Current board JSON:\n{json.dumps(board)}\n"
-        f"Conversation history:\n{history_text}\n"
-        f"Latest user prompt:\n{prompt.strip()}"
-    )
-
-
-def run_openai_board_operation(
-    api_key: str,
-    model: str,
-    prompt: str,
-    chat_history: list[ChatMessagePayload],
-    board: dict[str, Any],
-) -> str:
-    user_input = build_ai_board_operation_input(
-        prompt=prompt,
-        chat_history=chat_history,
-        board=board,
-    )
-    try:
-        client = OpenAI(api_key=api_key)
-        response = client.responses.create(model=model, input=user_input)
-    except AuthenticationError as error:
-        raise AIConnectivityError(
-            "OpenAI authentication failed. Check OPENAI_API_KEY.",
-            status_code=502,
-        ) from error
-    except Exception as error:
-        raise AIConnectivityError(f"OpenAI request failed: {error}") from error
-
-    response_text = (response.output_text or "").strip()
-    if not response_text:
-        raise AIConnectivityError("OpenAI returned an empty response.")
-    return response_text
-
-
-def parse_structured_board_output(raw_output: str) -> AIStructuredBoardOutput:
-    try:
-        payload = json.loads(raw_output)
-    except json.JSONDecodeError as error:
-        raise AIResponseValidationError(f"AI response is not valid JSON: {error.msg}") from error
-
-    try:
-        structured = AIStructuredBoardOutput.model_validate(payload)
-    except ValidationError as error:
-        raise AIResponseValidationError("AI response does not match required schema.") from error
-
-    if not structured.assistant_response.strip():
-        raise AIResponseValidationError("assistant_response cannot be empty.")
-
-    return structured
-
-
-def validate_board_integrity(board: dict[str, Any]) -> None:
-    cards = board.get("cards", {})
-    columns = board.get("columns", [])
-
-    mismatched_ids = [
-        card_key for card_key, card_payload in cards.items() if card_payload.get("id") != card_key
-    ]
-    if mismatched_ids:
-        raise BoardValidationError(
-            f"Card key/id mismatch for: {', '.join(sorted(mismatched_ids))}."
-        )
-
-    seen_card_ids: set[str] = set()
-    duplicate_card_ids: set[str] = set()
-
-    for column in columns:
-        column_id = column.get("id", "unknown")
-        for card_id in column.get("cardIds", []):
-            if card_id not in cards:
-                raise BoardValidationError(
-                    f"Column '{column_id}' references missing card '{card_id}'."
-                )
-            if card_id in seen_card_ids:
-                duplicate_card_ids.add(card_id)
-            seen_card_ids.add(card_id)
-
-    if duplicate_card_ids:
-        raise BoardValidationError(
-            "Cards may appear in only one column. Duplicates: "
-            + ", ".join(sorted(duplicate_card_ids))
-            + "."
-        )
-
-    unassigned_cards = sorted(card_id for card_id in cards if card_id not in seen_card_ids)
-    if unassigned_cards:
-        raise BoardValidationError(
-            "Cards must appear in a column. Unassigned: " + ", ".join(unassigned_cards) + "."
-        )
+    cleaned = x_user.strip()
+    if not re.match(r'^[a-zA-Z0-9_-]{1,100}$', cleaned):
+        raise HTTPException(status_code=401, detail="Invalid user header.")
+    return cleaned
 
 
 def create_app(db_path: Path | None = None) -> FastAPI:
@@ -387,29 +88,384 @@ def create_app(db_path: Path | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        initialize_database(app.state.db_path)
+        logger.info("Initializing database at %s", app.state.db_path)
+        db.initialize_database(app.state.db_path)
+        logger.info("Application startup complete")
         yield
 
-    app = FastAPI(title="Project Management MVP Backend", lifespan=lifespan)
+    app = FastAPI(title="Replay Studio Backend", lifespan=lifespan)
     app.state.db_path = resolved_db_path
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    # ---------- Auth ----------
+
+    @app.post("/api/auth/register", response_model=AuthResponse)
+    def register(payload: AuthRequest, request: Request) -> AuthResponse:
+        with db.get_connection(request.app.state.db_path) as connection:
+            if db.user_exists(connection, payload.username):
+                raise HTTPException(status_code=409, detail="Username already taken.")
+            user_id = db.create_user(connection, payload.username, payload.password)
+            db.create_project(connection, user_id, "My Project")
+            connection.commit()
+        return AuthResponse(username=payload.username, message="Account created successfully.")
+
+    @app.post("/api/auth/login", response_model=AuthResponse)
+    def login(payload: AuthRequest, request: Request) -> AuthResponse:
+        with db.get_connection(request.app.state.db_path) as connection:
+            user_id = db.verify_user(connection, payload.username, payload.password)
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Invalid username or password.")
+        return AuthResponse(username=payload.username, message="Login successful.")
+
+    # ---------- Projects ----------
+
+    @app.get("/api/projects", response_model=list[ProjectPayload])
+    def list_projects(
+        request: Request,
+        username: str = Depends(get_authenticated_user),
+    ) -> list[ProjectPayload]:
+        with db.get_connection(request.app.state.db_path) as connection:
+            user_id = db.ensure_user(connection, username)
+            projects = db.list_projects(connection, user_id)
+            connection.commit()
+        return [ProjectPayload(**p) for p in projects]
+
+    @app.post("/api/projects", response_model=ProjectPayload, status_code=201)
+    def create_project(
+        payload: ProjectCreateRequest,
+        request: Request,
+        username: str = Depends(get_authenticated_user),
+    ) -> ProjectPayload:
+        with db.get_connection(request.app.state.db_path) as connection:
+            user_id = db.ensure_user(connection, username)
+            project = db.create_project(connection, user_id, payload.name)
+            connection.commit()
+        return ProjectPayload(**project)
+
+    @app.put("/api/projects/{project_id}", response_model=ProjectPayload)
+    def rename_project(
+        project_id: int,
+        payload: ProjectRenameRequest,
+        request: Request,
+        username: str = Depends(get_authenticated_user),
+    ) -> ProjectPayload:
+        with db.get_connection(request.app.state.db_path) as connection:
+            user_id = db.ensure_user(connection, username)
+            if not db.rename_project(connection, user_id, project_id, payload.name):
+                raise HTTPException(status_code=404, detail="Project not found.")
+            connection.commit()
+        return ProjectPayload(id=project_id, name=payload.name)
+
+    @app.delete("/api/projects/{project_id}", status_code=204)
+    def delete_project_endpoint(
+        project_id: int,
+        request: Request,
+        username: str = Depends(get_authenticated_user),
+    ) -> None:
+        with db.get_connection(request.app.state.db_path) as connection:
+            user_id = db.ensure_user(connection, username)
+            if not db.delete_project(connection, user_id, project_id):
+                raise HTTPException(status_code=404, detail="Project not found.")
+            connection.commit()
+
+    # ---------- Tags ----------
+
+    @app.get("/api/tags", response_model=list[TagPayload])
+    def list_tags(
+        request: Request,
+        username: str = Depends(get_authenticated_user),
+    ) -> list[TagPayload]:
+        with db.get_connection(request.app.state.db_path) as connection:
+            user_id = db.ensure_user(connection, username)
+            tags = db.list_tags(connection, user_id)
+            connection.commit()
+        return [TagPayload(**t) for t in tags]
+
+    @app.post("/api/tags", response_model=TagPayload, status_code=201)
+    def create_tag(
+        payload: TagCreateRequest,
+        request: Request,
+        username: str = Depends(get_authenticated_user),
+    ) -> TagPayload:
+        with db.get_connection(request.app.state.db_path) as connection:
+            user_id = db.ensure_user(connection, username)
+            try:
+                tag = db.create_tag(connection, user_id, payload.name, payload.color)
+            except Exception:
+                raise HTTPException(status_code=409, detail="Tag with this name already exists.")
+            connection.commit()
+        return TagPayload(**tag)
+
+    @app.put("/api/tags/{tag_id}", response_model=TagPayload)
+    def update_tag(
+        tag_id: int,
+        payload: TagUpdateRequest,
+        request: Request,
+        username: str = Depends(get_authenticated_user),
+    ) -> TagPayload:
+        with db.get_connection(request.app.state.db_path) as connection:
+            user_id = db.ensure_user(connection, username)
+            if not db.update_tag(connection, user_id, tag_id, payload.name, payload.color):
+                raise HTTPException(status_code=404, detail="Tag not found.")
+            connection.commit()
+            tags = db.list_tags(connection, user_id)
+            tag = next((t for t in tags if t["id"] == tag_id), None)
+            if not tag:
+                raise HTTPException(status_code=404, detail="Tag not found.")
+        return TagPayload(**tag)
+
+    @app.delete("/api/tags/{tag_id}", status_code=204)
+    def delete_tag_endpoint(
+        tag_id: int,
+        request: Request,
+        username: str = Depends(get_authenticated_user),
+    ) -> None:
+        with db.get_connection(request.app.state.db_path) as connection:
+            user_id = db.ensure_user(connection, username)
+            if not db.delete_tag(connection, user_id, tag_id):
+                raise HTTPException(status_code=404, detail="Tag not found.")
+            connection.commit()
+
+    # ---------- Board (project-scoped) ----------
+
+    @app.get("/api/projects/{project_id}/board", response_model=BoardEnvelope)
+    def read_project_board(
+        project_id: int,
+        request: Request,
+        username: str = Depends(get_authenticated_user),
+    ) -> BoardEnvelope:
+        with db.get_connection(request.app.state.db_path) as connection:
+            user_id = db.ensure_user(connection, username)
+            project = db.get_project(connection, user_id, project_id)
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found.")
+            board = db.load_board_for_project(connection, user_id, project_id)
+            if not board:
+                board = copy.deepcopy(db.EMPTY_BOARD)
+                db.save_board_for_project(connection, user_id, project_id, board)
+            else:
+                try:
+                    validate_board_integrity(board)
+                except BoardValidationError as exc:
+                    logger.warning("Board integrity failed for project %d: %s. Resetting.", project_id, exc)
+                    board = copy.deepcopy(db.EMPTY_BOARD)
+                    db.save_board_for_project(connection, user_id, project_id, board)
+            connection.commit()
+        return BoardEnvelope(board=BoardPayload.model_validate(board))
+
+    @app.put("/api/projects/{project_id}/board", response_model=BoardEnvelope)
+    def update_project_board(
+        project_id: int,
+        payload: BoardEnvelope,
+        request: Request,
+        username: str = Depends(get_authenticated_user),
+    ) -> BoardEnvelope:
+        board_data = payload.board.model_dump()
+        try:
+            validate_board_integrity(board_data)
+        except BoardValidationError as error:
+            raise HTTPException(status_code=422, detail=error.message) from error
+
+        with db.get_connection(request.app.state.db_path) as connection:
+            user_id = db.ensure_user(connection, username)
+            project = db.get_project(connection, user_id, project_id)
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found.")
+            db.save_board_for_project(connection, user_id, project_id, board_data)
+            connection.commit()
+        return BoardEnvelope(board=payload.board)
+
+    # ---------- AI ----------
+
+    @app.post("/api/ai/health", response_model=AIHealthResponse)
+    def ai_health_check(payload: AIHealthRequest) -> AIHealthResponse:
+        if not ai_rate_limiter.check("__health__"):
+            raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again later.")
+        api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        if not api_key:
+            raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not configured.")
+
+        model = ai.get_openai_model()
+        try:
+            response_text = ai.run_openai_connectivity_check(
+                api_key=api_key, model=model, prompt=payload.prompt,
+            )
+        except AIConnectivityError as error:
+            raise HTTPException(status_code=error.status_code, detail=error.message) from error
+
+        return AIHealthResponse(
+            status="ok", model=model, prompt=payload.prompt, response=response_text,
+        )
+
+    @app.post("/api/projects/{project_id}/ai/chat", response_model=AIChatResponse)
+    def ai_chat(
+        project_id: int,
+        payload: AIChatRequest,
+        request: Request,
+        username: str = Depends(get_authenticated_user),
+    ) -> AIChatResponse:
+        if not ai_rate_limiter.check(username):
+            raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again later.")
+        api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        if not api_key:
+            raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not configured.")
+
+        with db.get_connection(request.app.state.db_path) as connection:
+            user_id = db.ensure_user(connection, username)
+            project = db.get_project(connection, user_id, project_id)
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found.")
+            current_board = db.load_board_for_project(connection, user_id, project_id)
+            if not current_board:
+                current_board = copy.deepcopy(db.EMPTY_BOARD)
+            connection.commit()
+
+        model = ai.get_openai_model()
+        try:
+            raw_output = ai.run_openai_board_operation(
+                api_key=api_key, model=model, prompt=payload.prompt,
+                chat_history=payload.chat_history, board=current_board,
+            )
+        except AIConnectivityError as error:
+            raise HTTPException(status_code=error.status_code, detail=error.message) from error
+
+        board_updated = False
+        used_fallback = False
+        response_text = ai.AI_OUTPUT_FALLBACK_MESSAGE
+        final_board = current_board
+
+        try:
+            structured = ai.parse_structured_board_output(raw_output)
+            response_text = structured.assistant_response.strip()
+
+            if structured.board is not None:
+                final_board = structured.board.model_dump()
+                validate_board_integrity(final_board)
+                with db.get_connection(request.app.state.db_path) as connection:
+                    db.save_board_for_project(connection, user_id, project_id, final_board)
+                    connection.commit()
+                board_updated = True
+        except AIResponseValidationError as exc:
+            logger.warning("AI response validation failed: %s", exc)
+            used_fallback = True
+        except BoardValidationError as exc:
+            logger.warning("AI board integrity check failed: %s", exc)
+            used_fallback = True
+            response_text = ai.AI_OUTPUT_FALLBACK_MESSAGE
+            final_board = current_board
+
+        return AIChatResponse(
+            assistant_response=response_text,
+            board=BoardPayload.model_validate(final_board),
+            board_updated=board_updated,
+            used_fallback=used_fallback,
+            model=model,
+        )
+
+    @app.post("/api/projects/{project_id}/ai/plan", response_model=AIChatResponse)
+    def ai_plan(
+        project_id: int,
+        payload: AIPlanRequest,
+        request: Request,
+        username: str = Depends(get_authenticated_user),
+    ) -> AIChatResponse:
+        if not ai_rate_limiter.check(username):
+            raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again later.")
+        api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        if not api_key:
+            raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not configured.")
+
+        with db.get_connection(request.app.state.db_path) as connection:
+            user_id = db.ensure_user(connection, username)
+            project = db.get_project(connection, user_id, project_id)
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found.")
+            current_board = db.load_board_for_project(connection, user_id, project_id)
+            if not current_board:
+                current_board = copy.deepcopy(db.EMPTY_BOARD)
+            existing_tags = db.list_tags(connection, user_id)
+            connection.commit()
+
+        model = ai.get_openai_model()
+        try:
+            raw_output = ai.run_openai_plan_operation(
+                api_key=api_key, model=model, description=payload.description,
+                chat_history=payload.chat_history, board=current_board,
+                existing_tags=existing_tags,
+            )
+        except AIConnectivityError as error:
+            raise HTTPException(status_code=error.status_code, detail=error.message) from error
+
+        board_updated = False
+        used_fallback = False
+        response_text = ai.AI_OUTPUT_FALLBACK_MESSAGE
+        final_board = current_board
+
+        try:
+            structured = ai.parse_structured_plan_output(raw_output)
+            response_text = structured["assistant_response"]
+
+            if structured.get("tags") and structured.get("board"):
+                with db.get_connection(request.app.state.db_path) as connection:
+                    user_id = db.ensure_user(connection, username)
+                    tag_id_map: dict[str, int] = {}
+                    for tag_info in structured["tags"]:
+                        tag = db.get_or_create_tag(connection, user_id, tag_info["name"], tag_info["color"])
+                        tag_id_map[tag_info["name"]] = tag["id"]
+
+                    plan_board = structured["board"]
+                    for card in plan_board.get("cards", {}).values():
+                        tag_names = card.get("tagNames", [])
+                        card["tagIds"] = [tag_id_map[n] for n in tag_names if n in tag_id_map]
+                        card.pop("tagNames", None)
+
+                    validated = BoardPayload.model_validate(plan_board)
+                    final_board = validated.model_dump()
+                    validate_board_integrity(final_board)
+                    db.save_board_for_project(connection, user_id, project_id, final_board)
+                    connection.commit()
+                    board_updated = True
+            elif structured.get("board"):
+                validated = BoardPayload.model_validate(structured["board"])
+                final_board = validated.model_dump()
+                validate_board_integrity(final_board)
+                with db.get_connection(request.app.state.db_path) as connection:
+                    db.save_board_for_project(connection, user_id, project_id, final_board)
+                    connection.commit()
+                board_updated = True
+        except (AIResponseValidationError, BoardValidationError, Exception) as exc:
+            logger.warning("AI plan processing failed: %s", exc)
+            used_fallback = True
+            response_text = ai.AI_OUTPUT_FALLBACK_MESSAGE
+            final_board = current_board
+
+        return AIChatResponse(
+            assistant_response=response_text,
+            board=BoardPayload.model_validate(final_board),
+            board_updated=board_updated,
+            used_fallback=used_fallback,
+            model=model,
+        )
+
+    # ---------- Legacy board routes (backward compat for old tests) ----------
+
     @app.get("/api/board", response_model=BoardEnvelope)
     def read_board(
         request: Request,
         username: str = Depends(get_authenticated_user),
     ) -> BoardEnvelope:
-        with get_connection(request.app.state.db_path) as connection:
-            user_id = ensure_user(connection, username)
-            board = load_or_create_board(connection, user_id)
+        with db.get_connection(request.app.state.db_path) as connection:
+            user_id = db.ensure_user(connection, username)
+            board = db.load_or_create_board(connection, user_id)
             try:
                 validate_board_integrity(board)
-            except BoardValidationError:
+            except BoardValidationError as exc:
+                logger.warning("Board integrity failed for user %s: %s. Resetting.", username, exc)
                 board = copy.deepcopy(DEFAULT_BOARD)
-                save_board(connection, user_id, board)
+                db.save_board(connection, user_id, board)
             connection.commit()
         return BoardEnvelope(board=BoardPayload.model_validate(board))
 
@@ -425,89 +481,61 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         except BoardValidationError as error:
             raise HTTPException(status_code=422, detail=error.message) from error
 
-        with get_connection(request.app.state.db_path) as connection:
-            user_id = ensure_user(connection, username)
-            save_board(connection, user_id, board_data)
+        with db.get_connection(request.app.state.db_path) as connection:
+            user_id = db.ensure_user(connection, username)
+            db.save_board(connection, user_id, board_data)
             connection.commit()
         return BoardEnvelope(board=payload.board)
 
-    @app.post("/api/ai/health", response_model=AIHealthResponse)
-    def ai_health_check(payload: AIHealthRequest) -> AIHealthResponse:
-        api_key = os.getenv("OPENAI_API_KEY", "").strip()
-        if not api_key:
-            raise HTTPException(
-                status_code=500,
-                detail="OPENAI_API_KEY is not configured.",
-            )
-
-        model = get_openai_model()
-        try:
-            response_text = run_openai_connectivity_check(
-                api_key=api_key,
-                model=model,
-                prompt=payload.prompt,
-            )
-        except AIConnectivityError as error:
-            raise HTTPException(status_code=error.status_code, detail=error.message) from error
-
-        return AIHealthResponse(
-            status="ok",
-            model=model,
-            prompt=payload.prompt,
-            response=response_text,
-        )
-
     @app.post("/api/ai/chat", response_model=AIChatResponse)
-    def ai_chat(
+    def ai_chat_legacy(
         payload: AIChatRequest,
         request: Request,
         username: str = Depends(get_authenticated_user),
     ) -> AIChatResponse:
+        if not ai_rate_limiter.check(username):
+            raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again later.")
         api_key = os.getenv("OPENAI_API_KEY", "").strip()
         if not api_key:
-            raise HTTPException(
-                status_code=500,
-                detail="OPENAI_API_KEY is not configured.",
-            )
+            raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not configured.")
 
-        with get_connection(request.app.state.db_path) as connection:
-            user_id = ensure_user(connection, username)
-            current_board = load_or_create_board(connection, user_id)
+        with db.get_connection(request.app.state.db_path) as connection:
+            user_id = db.ensure_user(connection, username)
+            current_board = db.load_or_create_board(connection, user_id)
             connection.commit()
 
-        model = get_openai_model()
+        model = ai.get_openai_model()
         try:
-            raw_output = run_openai_board_operation(
-                api_key=api_key,
-                model=model,
-                prompt=payload.prompt,
-                chat_history=payload.chat_history,
-                board=current_board,
+            raw_output = ai.run_openai_board_operation(
+                api_key=api_key, model=model, prompt=payload.prompt,
+                chat_history=payload.chat_history, board=current_board,
             )
         except AIConnectivityError as error:
             raise HTTPException(status_code=error.status_code, detail=error.message) from error
 
         board_updated = False
         used_fallback = False
-        response_text = AI_OUTPUT_FALLBACK_MESSAGE
+        response_text = ai.AI_OUTPUT_FALLBACK_MESSAGE
         final_board = current_board
 
         try:
-            structured = parse_structured_board_output(raw_output)
+            structured = ai.parse_structured_board_output(raw_output)
             response_text = structured.assistant_response.strip()
 
             if structured.board is not None:
                 final_board = structured.board.model_dump()
                 validate_board_integrity(final_board)
-                with get_connection(request.app.state.db_path) as connection:
-                    save_board(connection, user_id, final_board)
+                with db.get_connection(request.app.state.db_path) as connection:
+                    db.save_board(connection, user_id, final_board)
                     connection.commit()
                 board_updated = True
-        except AIResponseValidationError:
+        except AIResponseValidationError as exc:
+            logger.warning("AI response validation failed: %s", exc)
             used_fallback = True
-        except BoardValidationError:
+        except BoardValidationError as exc:
+            logger.warning("AI board integrity check failed: %s", exc)
             used_fallback = True
-            response_text = AI_OUTPUT_FALLBACK_MESSAGE
+            response_text = ai.AI_OUTPUT_FALLBACK_MESSAGE
             final_board = current_board
 
         return AIChatResponse(
@@ -518,13 +546,10 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             model=model,
         )
 
+    # ---------- Static files ----------
+
     if FRONTEND_DIR.exists():
         app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
-    else:
-
-        @app.get("/", response_class=FileResponse)
-        async def index() -> FileResponse:
-            return FileResponse(FALLBACK_INDEX_PATH)
 
     return app
 

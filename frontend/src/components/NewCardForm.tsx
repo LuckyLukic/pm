@@ -21,16 +21,16 @@ export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
   };
 
   return (
-    <div className="mt-4">
+    <div className="mt-3">
       {isOpen ? (
-        <form onSubmit={handleSubmit} className="space-y-3">
+        <form onSubmit={handleSubmit} className="space-y-2">
           <input
             value={formState.title}
             onChange={(event) =>
               setFormState((prev) => ({ ...prev, title: event.target.value }))
             }
             placeholder="Card title"
-            className="w-full rounded-xl border border-[var(--stroke)] bg-white px-3 py-2 text-sm font-medium text-[var(--navy-dark)] outline-none transition focus:border-[var(--primary-blue)]"
+            className="w-full rounded-[var(--radius-sm)] border border-[var(--stroke-strong)] bg-white px-2.5 py-2 text-sm text-[var(--navy-dark)] outline-none transition focus:border-[var(--secondary-purple)] focus:ring-1 focus:ring-[var(--stroke-focus)]"
             required
           />
           <textarea
@@ -38,14 +38,14 @@ export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
             onChange={(event) =>
               setFormState((prev) => ({ ...prev, details: event.target.value }))
             }
-            placeholder="Details"
-            rows={3}
-            className="w-full resize-none rounded-xl border border-[var(--stroke)] bg-white px-3 py-2 text-sm text-[var(--gray-text)] outline-none transition focus:border-[var(--primary-blue)]"
+            placeholder="Details (optional)"
+            rows={2}
+            className="w-full resize-none rounded-[var(--radius-sm)] border border-[var(--stroke-strong)] bg-white px-2.5 py-2 text-sm text-[var(--gray-text)] outline-none transition focus:border-[var(--secondary-purple)] focus:ring-1 focus:ring-[var(--stroke-focus)]"
           />
           <div className="flex items-center gap-2">
             <button
               type="submit"
-              className="rounded-full bg-[var(--secondary-purple)] px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white transition hover:brightness-110"
+              className="rounded-[var(--radius-sm)] bg-[var(--secondary-purple)] px-3 py-1.5 text-xs font-medium text-white transition hover:opacity-90"
             >
               Add card
             </button>
@@ -55,7 +55,7 @@ export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
                 setIsOpen(false);
                 setFormState(initialFormState);
               }}
-              className="rounded-full border border-[var(--stroke)] px-3 py-2 text-xs font-semibold uppercase tracking-wide text-[var(--gray-text)] transition hover:text-[var(--navy-dark)]"
+              className="rounded-[var(--radius-sm)] px-3 py-1.5 text-xs font-medium text-[var(--gray-text)] transition hover:text-[var(--navy-dark)]"
             >
               Cancel
             </button>
@@ -65,9 +65,9 @@ export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
         <button
           type="button"
           onClick={() => setIsOpen(true)}
-          className="w-full rounded-full border border-dashed border-[var(--stroke)] px-3 py-2 text-xs font-semibold uppercase tracking-wide text-[var(--primary-blue)] transition hover:border-[var(--primary-blue)]"
+          className="w-full rounded-[var(--radius-sm)] border border-dashed border-[var(--stroke-strong)] px-3 py-2 text-xs font-medium text-[var(--gray-text)] transition hover:border-[var(--secondary-purple)] hover:text-[var(--secondary-purple)]"
         >
-          Add a card
+          + Add a card
         </button>
       )}
     </div>

@@ -1,42 +1,54 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import clsx from "clsx";
 import type { Card } from "@/lib/kanban";
+import type { Tag } from "@/lib/boardApi";
 
 type KanbanCardProps = {
   card: Card;
+  tags: Tag[];
   onDelete: (cardId: string) => void;
-  onUpdate: (cardId: string, title: string, details: string) => void;
+  onUpdate: (cardId: string, title: string, details: string, tagIds: number[]) => void;
 };
 
-export const KanbanCard = ({ card, onDelete, onUpdate }: KanbanCardProps) => {
+export const KanbanCard = ({ card, tags, onDelete, onUpdate }: KanbanCardProps) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: card.id });
   const [isEditing, setIsEditing] = useState(false);
-  const [title, setTitle] = useState(card.title);
-  const [details, setDetails] = useState(card.details);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDetails, setEditDetails] = useState("");
+  const [editTagIds, setEditTagIds] = useState<number[]>([]);
+  const [showTagPicker, setShowTagPicker] = useState(false);
 
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
   };
 
-  useEffect(() => {
-    if (isEditing) {
-      return;
-    }
-    setTitle(card.title);
-    setDetails(card.details);
-  }, [card.title, card.details, isEditing]);
+  const cardTags = tags.filter((t) => (card.tagIds ?? []).includes(t.id));
+
+  const startEditing = () => {
+    setEditTitle(card.title);
+    setEditDetails(card.details);
+    setEditTagIds([...(card.tagIds ?? [])]);
+    setIsEditing(true);
+    setShowTagPicker(false);
+  };
 
   const handleSubmit = () => {
-    const nextTitle = title.trim();
+    const nextTitle = editTitle.trim();
     if (!nextTitle) {
       return;
     }
-    onUpdate(card.id, nextTitle, details.trim() || "No details yet.");
+    onUpdate(card.id, nextTitle, editDetails.trim() || "No details yet.", editTagIds);
     setIsEditing(false);
+  };
+
+  const toggleEditTag = (tagId: number) => {
+    setEditTagIds((prev) =>
+      prev.includes(tagId) ? prev.filter((id) => id !== tagId) : [...prev, tagId]
+    );
   };
 
   const dragBindings = isEditing ? {} : { ...attributes, ...listeners };
@@ -46,81 +58,123 @@ export const KanbanCard = ({ card, onDelete, onUpdate }: KanbanCardProps) => {
       ref={setNodeRef}
       style={style}
       className={clsx(
-        "rounded-2xl border border-transparent bg-white px-4 py-4 shadow-[0_12px_24px_rgba(3,33,71,0.08)]",
-        "transition-all duration-150",
-        isDragging && "opacity-60 shadow-[0_18px_32px_rgba(3,33,71,0.16)]"
+        "group rounded-[var(--radius-md)] border border-[var(--stroke)] bg-white p-3 shadow-[var(--shadow-xs)] transition-all duration-150",
+        "hover:shadow-[var(--shadow-sm)] hover:border-[var(--stroke-strong)]",
+        isDragging && "opacity-50 shadow-[var(--shadow-md)]"
       )}
       {...dragBindings}
       data-testid={`card-${card.id}`}
     >
-      <div className="flex items-start justify-between gap-3">
-        {isEditing ? (
-          <div className="w-full space-y-2">
-            <input
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              className="w-full rounded-lg border border-[var(--stroke)] px-2 py-1 text-sm font-semibold text-[var(--navy-dark)] outline-none focus:border-[var(--primary-blue)]"
-              aria-label={`Edit title ${card.id}`}
-            />
-            <textarea
-              value={details}
-              onChange={(event) => setDetails(event.target.value)}
-              rows={3}
-              className="w-full resize-none rounded-lg border border-[var(--stroke)] px-2 py-1 text-sm text-[var(--gray-text)] outline-none focus:border-[var(--primary-blue)]"
-              aria-label={`Edit details ${card.id}`}
-            />
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={handleSubmit}
-                className="rounded-full bg-[var(--secondary-purple)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.08em] text-white transition hover:brightness-110"
-              >
-                Save
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setTitle(card.title);
-                  setDetails(card.details);
-                  setIsEditing(false);
-                }}
-                className="rounded-full border border-[var(--stroke)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--gray-text)] transition hover:text-[var(--navy-dark)]"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        ) : (
-          <>
+      {isEditing ? (
+        <div className="space-y-2">
+          <input
+            value={editTitle}
+            onChange={(event) => setEditTitle(event.target.value)}
+            className="w-full rounded-[var(--radius-sm)] border border-[var(--stroke-strong)] px-2.5 py-1.5 text-sm font-medium text-[var(--navy-dark)] outline-none focus:border-[var(--secondary-purple)] focus:ring-1 focus:ring-[var(--stroke-focus)]"
+            aria-label={`Edit title ${card.id}`}
+          />
+          <textarea
+            value={editDetails}
+            onChange={(event) => setEditDetails(event.target.value)}
+            rows={3}
+            className="w-full resize-none rounded-[var(--radius-sm)] border border-[var(--stroke-strong)] px-2.5 py-1.5 text-sm text-[var(--gray-text)] outline-none focus:border-[var(--secondary-purple)] focus:ring-1 focus:ring-[var(--stroke-focus)]"
+            aria-label={`Edit details ${card.id}`}
+          />
+          {tags.length > 0 && (
             <div>
-              <h4 className="font-display text-base font-semibold text-[var(--navy-dark)]">
-                {card.title}
-              </h4>
-              <p className="mt-2 text-sm leading-6 text-[var(--gray-text)]">
-                {card.details}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setIsEditing(true)}
-                className="rounded-full border border-transparent px-2 py-1 text-xs font-semibold text-[var(--gray-text)] transition hover:border-[var(--stroke)] hover:text-[var(--navy-dark)]"
-                aria-label={`Edit ${card.title}`}
+                onClick={() => setShowTagPicker(!showTagPicker)}
+                className="text-[11px] font-medium text-[var(--secondary-purple)] hover:underline"
               >
-                Edit
+                {showTagPicker ? "Hide tags" : "Manage tags"}
               </button>
-              <button
-                type="button"
-                onClick={() => onDelete(card.id)}
-                className="rounded-full border border-transparent px-2 py-1 text-xs font-semibold text-[var(--gray-text)] transition hover:border-[var(--stroke)] hover:text-[var(--navy-dark)]"
-                aria-label={`Delete ${card.title}`}
-              >
-                Remove
-              </button>
+              {showTagPicker && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {tags.map((tag) => (
+                    <button
+                      key={tag.id}
+                      type="button"
+                      onClick={() => toggleEditTag(tag.id)}
+                      className={clsx(
+                        "rounded-[var(--radius-full)] px-2 py-0.5 text-[10px] font-medium transition",
+                        editTagIds.includes(tag.id)
+                          ? "ring-2 ring-offset-1 ring-[var(--secondary-purple)]"
+                          : "opacity-60 hover:opacity-100"
+                      )}
+                      style={{
+                        backgroundColor: tag.color + "1a",
+                        color: tag.color,
+                      }}
+                    >
+                      {tag.name}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
-          </>
-        )}
-      </div>
+          )}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleSubmit}
+              className="rounded-[var(--radius-sm)] bg-[var(--secondary-purple)] px-3 py-1.5 text-xs font-medium text-white transition hover:opacity-90"
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsEditing(false)}
+              className="rounded-[var(--radius-sm)] border border-[var(--stroke)] px-3 py-1.5 text-xs font-medium text-[var(--gray-text)] transition hover:text-[var(--navy-dark)]"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          {cardTags.length > 0 && (
+            <div className="mb-1.5 flex flex-wrap gap-1">
+              {cardTags.map((tag) => (
+                <span
+                  key={tag.id}
+                  className="rounded-[var(--radius-full)] px-2 py-0.5 text-[10px] font-medium"
+                  style={{
+                    backgroundColor: tag.color + "1a",
+                    color: tag.color,
+                  }}
+                >
+                  {tag.name}
+                </span>
+              ))}
+            </div>
+          )}
+          <h4 className="text-sm font-medium text-[var(--navy-dark)]">
+            {card.title}
+          </h4>
+          <p className="mt-1 text-[13px] leading-relaxed text-[var(--gray-text)]">
+            {card.details}
+          </p>
+          <div className="mt-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+            <button
+              type="button"
+              onClick={startEditing}
+              className="rounded-[var(--radius-sm)] px-2 py-1 text-[11px] font-medium text-[var(--gray-text)] transition hover:bg-[var(--surface-muted)] hover:text-[var(--navy-dark)]"
+              aria-label={`Edit ${card.title}`}
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              onClick={() => onDelete(card.id)}
+              className="rounded-[var(--radius-sm)] px-2 py-1 text-[11px] font-medium text-[var(--gray-text)] transition hover:bg-red-50 hover:text-red-600"
+              aria-label={`Delete ${card.title}`}
+            >
+              Remove
+            </button>
+          </div>
+        </>
+      )}
     </article>
   );
 };

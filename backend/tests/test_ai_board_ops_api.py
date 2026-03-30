@@ -8,7 +8,9 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.main import AI_OUTPUT_FALLBACK_MESSAGE, AIResponseValidationError, create_app, parse_structured_board_output
+from app.ai import AI_OUTPUT_FALLBACK_MESSAGE, parse_structured_board_output
+from app.main import create_app
+from app.models import AIResponseValidationError
 
 
 def test_parse_structured_board_output_accepts_valid_payload() -> None:
@@ -23,7 +25,7 @@ def test_parse_structured_board_output_rejects_invalid_json() -> None:
 
 
 def test_ai_chat_request_history_default_is_not_shared() -> None:
-    from app.main import AIChatRequest, ChatMessagePayload
+    from app.models import AIChatRequest, ChatMessagePayload
 
     first = AIChatRequest(prompt="a")
     second = AIChatRequest(prompt="b")
@@ -51,7 +53,7 @@ def test_ai_chat_returns_response_without_board_update(tmp_path: Path, monkeypat
         assert "columns" in board
         return json.dumps({"assistant_response": "Board looks good as-is."})
 
-    monkeypatch.setattr("app.main.run_openai_board_operation", fake_board_operation)
+    monkeypatch.setattr("app.ai.run_openai_board_operation", fake_board_operation)
 
     app = create_app(db_path=tmp_path / "ai-chat-no-update.db")
     with TestClient(app) as client:
@@ -97,7 +99,7 @@ def test_ai_chat_persists_valid_board_update(tmp_path: Path, monkeypatch) -> Non
             }
         )
 
-    monkeypatch.setattr("app.main.run_openai_board_operation", fake_board_operation)
+    monkeypatch.setattr("app.ai.run_openai_board_operation", fake_board_operation)
 
     app = create_app(db_path=tmp_path / "ai-chat-update.db")
     with TestClient(app) as client:
@@ -135,7 +137,7 @@ def test_ai_chat_uses_fallback_on_invalid_board_schema(tmp_path: Path, monkeypat
             }
         )
 
-    monkeypatch.setattr("app.main.run_openai_board_operation", fake_board_operation)
+    monkeypatch.setattr("app.ai.run_openai_board_operation", fake_board_operation)
 
     app = create_app(db_path=tmp_path / "ai-chat-invalid.db")
     with TestClient(app) as client:
@@ -182,7 +184,7 @@ def test_ai_chat_uses_fallback_on_board_integrity_violation(
             }
         )
 
-    monkeypatch.setattr("app.main.run_openai_board_operation", fake_board_operation)
+    monkeypatch.setattr("app.ai.run_openai_board_operation", fake_board_operation)
 
     app = create_app(db_path=tmp_path / "ai-chat-integrity-invalid.db")
     with TestClient(app) as client:

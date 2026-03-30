@@ -2,14 +2,19 @@
 
 import type { ChatMessage } from "@/lib/boardApi";
 
+export type AiMode = "chat" | "plan";
+
 type AIChatSidebarProps = {
   messages: ChatMessage[];
   prompt: string;
   onPromptChange: (value: string) => void;
   onSubmit: () => void;
+  onCancel?: () => void;
   isSending: boolean;
   error?: string;
   lastBoardUpdated?: boolean | null;
+  mode: AiMode;
+  onModeChange: (mode: AiMode) => void;
 };
 
 export const AIChatSidebar = ({
@@ -17,38 +22,84 @@ export const AIChatSidebar = ({
   prompt,
   onPromptChange,
   onSubmit,
+  onCancel,
   isSending,
   error,
   lastBoardUpdated,
+  mode,
+  onModeChange,
 }: AIChatSidebarProps) => {
   const canSend = prompt.trim().length > 0 && !isSending;
 
   return (
     <aside
-      className="rounded-[28px] border border-[var(--stroke)] bg-white p-5 shadow-[var(--shadow)]"
+      className="flex h-full flex-col"
       data-testid="ai-sidebar"
     >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[var(--gray-text)]">
-            AI Sidebar
-          </p>
-          <h2 className="mt-2 font-display text-2xl font-semibold text-[var(--navy-dark)]">
+      <div className="flex items-center justify-between border-b border-[var(--stroke)] px-4 py-3">
+        <div className="flex items-center gap-2">
+          <div className="flex h-6 w-6 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--primary-blue)]/10">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--primary-blue)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+          </div>
+          <h2 className="text-sm font-semibold text-[var(--navy-dark)]">
             AI Assistant
           </h2>
         </div>
         {lastBoardUpdated === true ? (
-          <span className="rounded-full bg-[var(--accent-yellow)] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--navy-dark)]">
-            Board Updated
+          <span className="rounded-[var(--radius-full)] bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-600">
+            Board updated
           </span>
         ) : null}
       </div>
 
-      <div className="mt-4 max-h-[340px] space-y-3 overflow-y-auto rounded-2xl border border-[var(--stroke)] bg-[var(--surface)] p-3">
+      {/* Mode toggle */}
+      <div className="border-b border-[var(--stroke)] px-4 py-2">
+        <div className="flex rounded-[var(--radius-sm)] bg-[var(--surface-muted)] p-0.5">
+          <button
+            type="button"
+            onClick={() => onModeChange("chat")}
+            className={`flex-1 rounded-[var(--radius-sm)] px-3 py-1.5 text-xs font-medium transition ${
+              mode === "chat"
+                ? "bg-white text-[var(--navy-dark)] shadow-[var(--shadow-sm)]"
+                : "text-[var(--gray-text)] hover:text-[var(--navy-dark)]"
+            }`}
+          >
+            Chat
+          </button>
+          <button
+            type="button"
+            onClick={() => onModeChange("plan")}
+            className={`flex-1 rounded-[var(--radius-sm)] px-3 py-1.5 text-xs font-medium transition ${
+              mode === "plan"
+                ? "bg-white text-[var(--navy-dark)] shadow-[var(--shadow-sm)]"
+                : "text-[var(--gray-text)] hover:text-[var(--navy-dark)]"
+            }`}
+          >
+            Plan
+          </button>
+        </div>
+      </div>
+
+      <div aria-live="polite" className="flex-1 space-y-2 overflow-y-auto p-4">
         {messages.length === 0 ? (
-          <p className="text-sm text-[var(--gray-text)]">
-            Ask for summaries, card updates, or task moves.
-          </p>
+          <div className="flex h-full flex-col items-center justify-center text-center">
+            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-[var(--surface-muted)]">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--gray-light)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                {mode === "plan" ? (
+                  <><rect x="3" y="3" width="18" height="18" rx="2" /><line x1="8" y1="9" x2="16" y2="9" /><line x1="8" y1="13" x2="14" y2="13" /><line x1="8" y1="17" x2="12" y2="17" /></>
+                ) : (
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                )}
+              </svg>
+            </div>
+            <p className="text-sm text-[var(--gray-text)]">
+              {mode === "plan"
+                ? "Describe your project and AI will create an action plan with tasks on your board."
+                : "Ask for summaries, card updates, or task moves."}
+            </p>
+          </div>
         ) : (
           messages.map((message, index) => (
             <article
@@ -56,14 +107,14 @@ export const AIChatSidebar = ({
               data-testid={`ai-message-${message.role}`}
               className={
                 message.role === "user"
-                  ? "rounded-xl bg-[var(--primary-blue)]/10 px-3 py-2"
-                  : "rounded-xl bg-white px-3 py-2"
+                  ? "rounded-[var(--radius-md)] bg-[var(--surface-muted)] px-3 py-2.5"
+                  : "rounded-[var(--radius-md)] border border-[var(--stroke)] bg-white px-3 py-2.5"
               }
             >
-              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--gray-text)]">
-                {message.role}
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--gray-light)]">
+                {message.role === "user" ? "You" : "AI"}
               </p>
-              <p className="mt-1 whitespace-pre-wrap text-sm text-[var(--navy-dark)]">
+              <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--navy-dark)]">
                 {message.content}
               </p>
             </article>
@@ -71,42 +122,61 @@ export const AIChatSidebar = ({
         )}
       </div>
 
-      <form
-        className="mt-4 space-y-3"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!canSend) {
-            return;
-          }
-          onSubmit();
-        }}
-      >
-        <label className="block">
-          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--gray-text)]">
-            Ask AI
-          </span>
+      <div className="border-t border-[var(--stroke)] p-4">
+        {error ? (
+          <div className="mb-3 rounded-[var(--radius-sm)] border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
+            {error}
+          </div>
+        ) : null}
+
+        <form
+          className="space-y-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!canSend) {
+              return;
+            }
+            onSubmit();
+          }}
+        >
           <textarea
             value={prompt}
             onChange={(event) => onPromptChange(event.target.value)}
-            rows={4}
-            className="mt-2 w-full resize-none rounded-xl border border-[var(--stroke)] bg-white px-3 py-2 text-sm text-[var(--navy-dark)] outline-none transition focus:border-[var(--primary-blue)]"
-            placeholder="Move card-2 to In Progress and summarize blockers."
+            rows={mode === "plan" ? 5 : 3}
+            className="w-full resize-none rounded-[var(--radius-md)] border border-[var(--stroke-strong)] bg-white px-3 py-2.5 text-sm text-[var(--navy-dark)] outline-none transition focus:border-[var(--secondary-purple)] focus:ring-1 focus:ring-[var(--stroke-focus)]"
+            placeholder={
+              mode === "plan"
+                ? "Describe your project goals, features, and requirements..."
+                : "Ask AI to update your board..."
+            }
             aria-label="Ask AI"
           />
-        </label>
-        {error ? (
-          <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
-          </p>
-        ) : null}
-        <button
-          type="submit"
-          disabled={!canSend}
-          className="w-full rounded-full bg-[var(--secondary-purple)] px-4 py-3 text-sm font-semibold uppercase tracking-[0.08em] text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {isSending ? "Sending..." : "Send"}
-        </button>
-      </form>
+          {isSending && onCancel ? (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="w-full rounded-[var(--radius-md)] border border-[var(--stroke-strong)] bg-white px-3 py-2 text-sm font-medium text-[var(--navy-dark)] transition hover:bg-[var(--surface-muted)]"
+            >
+              Cancel
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={!canSend}
+              className="w-full rounded-[var(--radius-md)] bg-[var(--secondary-purple)] px-3 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isSending ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                  {mode === "plan" ? "Planning..." : "Thinking..."}
+                </span>
+              ) : (
+                mode === "plan" ? "Generate Plan" : "Send"
+              )}
+            </button>
+          )}
+        </form>
+      </div>
     </aside>
   );
 };

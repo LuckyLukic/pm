@@ -46,6 +46,7 @@ def test_board_update_persists_for_authenticated_user(tmp_path: Path) -> None:
                 "id": "card-99",
                 "title": "Persisted card",
                 "details": "Stored in sqlite",
+                "tagIds": [],
             }
         },
     }

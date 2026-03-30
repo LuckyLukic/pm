@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Kanban Studio",
-  description: "A focused, single-board kanban workspace.",
+  title: "Replay Studio",
+  description: "A multi-project kanban workspace with AI assistance.",
 };
 
 export default function RootLayout({

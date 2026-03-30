@@ -5,7 +5,8 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.main import AIConnectivityError, create_app
+from app.main import create_app
+from app.models import AIConnectivityError
 
 
 def test_ai_health_returns_error_when_api_key_missing(
@@ -31,7 +32,7 @@ def test_ai_health_returns_response_payload(tmp_path: Path, monkeypatch) -> None
         assert prompt == "2+2"
         return "4"
 
-    monkeypatch.setattr("app.main.run_openai_connectivity_check", fake_connectivity_check)
+    monkeypatch.setattr("app.ai.run_openai_connectivity_check", fake_connectivity_check)
 
     app = create_app(db_path=tmp_path / "success.db")
     with TestClient(app) as client:
@@ -57,7 +58,7 @@ def test_ai_health_surfaces_authentication_failure(tmp_path: Path, monkeypatch) 
             status_code=502,
         )
 
-    monkeypatch.setattr("app.main.run_openai_connectivity_check", fake_connectivity_check)
+    monkeypatch.setattr("app.ai.run_openai_connectivity_check", fake_connectivity_check)
 
     app = create_app(db_path=tmp_path / "invalid-key.db")
     with TestClient(app) as client:

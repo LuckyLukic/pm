@@ -8,6 +8,12 @@ const cloneBoard = (board: BoardData): BoardData => {
   return structuredClone(board);
 };
 
+const toPath = (input: RequestInfo | URL) => {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.pathname;
+  return input.url;
+};
+
 describe("Home board API integration", () => {
   let persistedBoard: BoardData;
 
@@ -17,18 +23,40 @@ describe("Home board API integration", () => {
 
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = toPath(input);
         const method = init?.method ?? "GET";
 
-        if (method === "GET") {
+        if (path === "/api/auth/login" && method === "POST") {
+          return new Response(
+            JSON.stringify({ username: "user", message: "Login successful." }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+
+        if (path === "/api/projects" && method === "GET") {
+          return new Response(
+            JSON.stringify([{ id: 1, name: "My Project" }]),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+
+        if (path === "/api/tags" && method === "GET") {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (path === "/api/projects/1/board" && method === "GET") {
           return new Response(JSON.stringify({ board: persistedBoard }), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           });
         }
 
-        if (method === "PUT") {
-          const payload = JSON.parse(String(init.body)) as { board: BoardData };
+        if (path === "/api/projects/1/board" && method === "PUT") {
+          const payload = JSON.parse(String(init!.body)) as { board: BoardData };
           persistedBoard = payload.board;
           return new Response(JSON.stringify({ board: persistedBoard }), {
             status: 200,
@@ -53,7 +81,7 @@ describe("Home board API integration", () => {
     await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
 
     expect(
-      await screen.findByRole("heading", { name: /kanban studio/i })
+      await screen.findByRole("heading", { name: /replay studio/i })
     ).toBeInTheDocument();
 
     const firstColumn = screen.getAllByTestId(/column-/i)[0];
@@ -69,7 +97,7 @@ describe("Home board API integration", () => {
     expect(
       fetchMock.mock.calls.some(
         ([path, options]) =>
-          path === "/api/board" &&
+          toPath(path as RequestInfo | URL) === "/api/projects/1/board" &&
           options?.method === "PUT" &&
           (options.headers as Record<string, string>)?.["X-User"] === "user"
       )
